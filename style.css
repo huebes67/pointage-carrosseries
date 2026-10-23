@@ -43,14 +43,8 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
   border-bottom: 1px solid rgba(255,255,255,.04);
 }
 .brand { display: flex; align-items: center; gap: 12px; }
-.logo {
-  width: 40px; height: 40px; border-radius: 12px;
-  display: grid; place-items: center;
-  font-weight: 800; letter-spacing: .5px; color: #1a0d00;
-  background: linear-gradient(135deg, var(--accent-2), var(--accent));
-  box-shadow: 0 6px 18px rgba(255,122,26,.35);
-}
-.logo.big { width: 76px; height: 76px; border-radius: 22px; font-size: 28px; margin: 0 auto 18px; }
+.logo { width: 46px; height: 46px; object-fit: contain; filter: drop-shadow(0 4px 10px rgba(255,122,26,.3)); }
+.logo.big { width: 190px; height: 190px; margin: 0 auto 10px; filter: drop-shadow(0 10px 30px rgba(255,122,26,.35)); }
 .brand-title { font-weight: 750; font-size: 18px; }
 .brand-sub { font-size: 12px; color: var(--muted); }
 .top-actions { display: flex; gap: 6px; }
@@ -305,7 +299,11 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .qbtn[disabled] { opacity: .5; }
 .qlabel { font-size: 12.5px; color: var(--muted); font-weight: 600; margin: 4px 2px 8px; }
 .qcolors { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-.qcolors button { padding: 4px; border-radius: 50%; border: 2px solid transparent; }
+.qcolors button {
+  width: 44px; height: 44px; flex: none; padding: 0; display: grid; place-items: center;
+  border-radius: 50%; border: 2px solid transparent; aspect-ratio: 1;
+}
+.qcolors button .swatch { display: block; width: 32px; height: 32px; }
 .qcolors button.active { border-color: var(--accent); }
 .qnote { display: flex; gap: 8px; margin-bottom: 14px; }
 .qnote textarea { flex: 1; min-height: 52px; padding: 11px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--card); outline: none; font-size: 15px; resize: vertical; }
