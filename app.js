@@ -748,7 +748,7 @@
     };
     $("#fileInput2").onchange = (e) => { if (e.target.files[0]) { closeSheet(); openLocalFile(e.target.files[0]); } };
     const fg = $("#btnForget");
-    if (fg) fg.onclick = () => { LS.del("pc_key"); LS.del("pc_cache"); location.reload(); };
+    if (fg) fg.onclick = () => { LS.del("pc_key"); LS.del("pc_cache"); LS.del("pc_queue"); location.reload(); };
     const cd = $("#btnCode2"); if (cd) cd.onclick = () => askCode();
   }
 
