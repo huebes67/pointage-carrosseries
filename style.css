@@ -332,3 +332,4 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .cband.noir { background: #050506; }
 .row > .swatch { width: 22px; height: 22px; }
 .job.has-band .countdown { grid-row: 2 / span 2; }
+.seg-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }

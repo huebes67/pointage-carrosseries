@@ -48,7 +48,7 @@
     [/\bcoxmaxx\b/g, "cox maxx"], [/\bsc ?370\b/g, "sc 370"], [/\bste? ?pro\b/g, "st pro"], [/\bbig ?mama\b/g, "big mama"],
     [/\bbig ?rock\b/g, "big rock"], [/\b(205|250) ?gti\b/g, "205 gti"], [/\bx ?monster\b/g, "x monster"],
     [/\berevo ?2 ?pro\b/g, "erevo 2 pro"], [/\berevo 2\.0\b/g, "erevo 2"], [/\b(mojave|mojito) ?4 ?s\b/g, "$1 4s"],
-    [/\bpick ?up\b/g, "pick up"], [/\bhoos\b/g, "hoss"], [/^gorgon$/, "gorgonzola"], [/\bcox gold ?m\b/g, "cox gold m"],
+    [/\bpick ?up\b/g, "pick up"], [/\bhoos\b/g, "hoss"], [/^gorgon$/, "gorgonzola"], [/\bcox gold ?[mn]\b/g, "cox gold"], [/^maxx$/, "maxx v1"],
     [/\baggressif\b/g, "agressif"], [/\btekkno\b/g, "tekno"], [/^chargeur$/, "dodge chargeur"], [/\bempattement\b/g, ""],
     [/\bnew\b/g, "nouveau"], [/\bl ancien model\b/g, "ancien"], [/^chevy 80\b/, "chevy 1980"], [/\bxmax\b/g, "xmaxx"],
     [/\btm\b/g, "team magic"], [/\beb 6\b/g, "eb6"], [/^eb6$/, "team magic eb6"], [/\bcox 1\/0\b/g, "cox 1/10"],
@@ -58,6 +58,7 @@
   const MODEL_DISPLAY = {
     "chargeur dodge": "Dodge chargeur", "eb6 magic team": "Team magic EB6",
     "1/8 ancien truggy": "Truggy 1/8 ancien", "1/10 porsche": "Porsche 1/10",
+    "maxx v1": "Maxx v1", "cox gold": "Cox gold",
   };
   function modelKey(s) {
     let k = fold(s);
@@ -105,6 +106,7 @@
     view: "home",
     hist: { q: "", status: "all", list: [], shown: 0 },
     topRange: "365",
+    topCount: "10",
   };
 
   function buildRows(matrix) {
@@ -527,8 +529,10 @@
     const scope = state.rows.filter((r) => !from || (r.date && r.date > from));
     const byModel = {};
     for (const r of scope) byModel[r.name] = (byModel[r.name] || 0) + 1;
-    const top = Object.entries(byModel).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const sorted = Object.entries(byModel).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "fr"));
+    const top = state.topCount === "all" ? sorted : sorted.slice(0, 10);
     const tmax = top.length ? top[0][1] : 1;
+    $("#modelsInfo").textContent = `${sorted.length} modèles différents · ${scope.length} commandes`;
     $("#chartModels").innerHTML = `<div class="hbars">${top.map(([n, c]) => `
       <div class="hbar"><span class="name">${esc(n)}</span><div class="track"><div class="fill" style="width:${(c / tmax) * 100}%"></div></div><span class="val">${c}</span></div>`).join("")}</div>`;
 
@@ -830,6 +834,11 @@
     const b = e.target.closest("[data-range]"); if (!b) return;
     $$("#topRange button").forEach((c) => c.classList.toggle("active", c === b));
     state.topRange = b.dataset.range; renderStats();
+  };
+  $("#topCount").onclick = (e) => {
+    const b = e.target.closest("[data-count]"); if (!b) return;
+    $$("#topCount button").forEach((c) => c.classList.toggle("active", c === b));
+    state.topCount = b.dataset.count; renderStats();
   };
   new IntersectionObserver((ents) => { if (ents[0].isIntersecting && state.view === "history") moreHistory(); }, { rootMargin: "600px" })
     .observe($("#historySentinel"));

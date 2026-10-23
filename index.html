@@ -77,12 +77,18 @@
         <div id="chartMonths"></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>Top modèles</h2>
+        <div class="panel-head"><h2>Modèles</h2></div>
+        <div class="seg-row">
           <div class="seg" id="topRange">
             <button data-range="365" class="active">1 an</button>
-            <button data-range="all">Tout</button>
+            <button data-range="all">Depuis 2021</button>
+          </div>
+          <div class="seg" id="topCount">
+            <button data-count="10" class="active">Top 10</button>
+            <button data-count="all">Tous</button>
           </div>
         </div>
+        <div class="muted" id="modelsInfo" style="margin:0 0 10px"></div>
         <div id="chartModels"></div>
       </div>
       <div class="panel">
