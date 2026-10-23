@@ -415,7 +415,7 @@
       const d = (a.r.date - b.r.date) || (a.r.r - b.r.r);
       return recentFirst ? -d : d;
     });
-    $$("#todoSort button").forEach((b) => b.classList.toggle("active", b.dataset.sort === (recentFirst ? "new" : "old")));
+    $("#todoSort").classList.toggle("recent", recentFirst);
     const late = todo.filter((x) => x.u.cls === "late").length;
     const month = state.rows.filter((r) => r.date && r.date.getMonth() === t.getMonth() && r.date.getFullYear() === t.getFullYear()).length;
     const unpaid = state.rows.filter((r) => r.pay === "unpaid").length;
@@ -842,10 +842,11 @@
     $$("#topRange button").forEach((c) => c.classList.toggle("active", c === b));
     state.topRange = b.dataset.range; renderStats();
   };
-  $("#todoSort").onclick = (e) => {
-    const b = e.target.closest("[data-sort]"); if (!b) return;
-    LS.set("pc_todoSort", b.dataset.sort);
+  $("#todoSort").onclick = () => {
+    const next = LS.get("pc_todoSort", "old") === "new" ? "old" : "new";
+    LS.set("pc_todoSort", next);
     renderHome();
+    toast(next === "new" ? "Plus récentes en haut" : "Plus anciennes en haut");
   };
   $("#topCount").onclick = (e) => {
     const b = e.target.closest("[data-count]"); if (!b) return;

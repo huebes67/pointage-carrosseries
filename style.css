@@ -374,6 +374,14 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
 @keyframes slide { from { left: -40%; } to { left: 100%; } }
 
-/* Tri des commandes en cours */
-.todo-sort { display: flex; width: 100%; margin: -2px 0 12px; }
-.todo-sort button { flex: 1; padding: 9px 6px; font-size: 13px; }
+/* Tri des commandes en cours : flèche orange = sens actuel */
+.title-row { display: flex; align-items: center; gap: 10px; }
+.sort-btn {
+  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card); border: 1px solid var(--line); color: var(--muted);
+}
+.sort-btn svg { width: 18px; height: 18px; }
+.sort-btn .ar-up, .sort-btn.recent .ar-down { stroke: var(--accent); }
+.sort-btn.recent .ar-up { stroke: var(--muted); }
+.sort-btn .ar-down { stroke: var(--muted); }
+.sort-btn:active { transform: scale(.92); }
