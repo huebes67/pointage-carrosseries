@@ -163,9 +163,9 @@
         // text/plain : évite la requête de vérification que Google refuse
         res = await fetch(c.scriptUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...body, key: c.key }) });
       } catch {
-        throw new Error("Pas de connexion internet ?");
+        const err = new Error("Pas de connexion internet ?"); err.network = true; throw err;
       }
-      if (!res.ok) throw new Error("Serveur Google indisponible (" + res.status + ")");
+      if (!res.ok) { const err = new Error("Serveur Google indisponible (" + res.status + ")"); err.network = true; throw err; }
       let j;
       try { j = await res.json(); } catch { throw new Error("Réponse inattendue : vérifie l'adresse du script"); }
       if (!j.ok) { const err = new Error(j.error || "Erreur"); err.auth = /code/i.test(j.error || ""); throw err; }
@@ -174,19 +174,66 @@
     async load() { return (await this.call({ action: "read" })).values; },
   };
 
-  // ---------- Écriture (Google Sheets ou fichier local en mémoire) ----------
-  // values = [A..F] (date en numéro de série Excel) ; null = ne pas toucher la cellule
+  // ---------- File d'envoi en arrière-plan ----------
+  // Chaque modification s'affiche tout de suite ; l'envoi au tableau se fait ensuite, dans l'ordre.
+  // La file est gardée sur le téléphone : sans réseau, elle repart dès que la connexion revient.
+  const queue = { items: LS.get("pc_queue", []), busy: false, wantRefresh: false };
+  function enqueue(body) {
+    queue.items.push(body);
+    LS.set("pc_queue", queue.items);
+    renderSync();
+    runQueue();
+  }
+  let retryTimer;
+  async function runQueue() {
+    if (queue.busy || state.source !== "sheet" || !queue.items.length) return;
+    queue.busy = true;
+    $("#btnRefresh").classList.add("spin");
+    let resync = false;
+    try {
+      while (queue.items.length) {
+        const body = queue.items[0];
+        try {
+          const res = await api.call(body);
+          // Quelqu'un d'autre a ajouté une ligne en même temps : on se recale sur le tableau
+          if (body.action === "add" && res.row !== body.localRow) resync = true;
+        } catch (e) {
+          if (e.network) { clearTimeout(retryTimer); retryTimer = setTimeout(runQueue, 15000); return; }
+          if (e.auth) { queue.items = []; LS.del("pc_queue"); LS.del("pc_key"); askCode(e.message); return; }
+          toast("Modification refusée : " + e.message, true);
+          resync = true;
+        }
+        queue.items.shift();
+        LS.set("pc_queue", queue.items);
+        renderSync();
+      }
+    } finally {
+      queue.busy = false;
+      $("#btnRefresh").classList.remove("spin");
+      renderSync();
+    }
+    if (resync || queue.wantRefresh) { queue.wantRefresh = false; refresh(true); }
+  }
+  window.addEventListener("online", runQueue);
+
+  function renderSync() {
+    const n = queue.items.length;
+    $("#syncInfo").textContent = state.source === "file"
+      ? `Fichier : ${state.fileName}`
+      : n ? `⏳ ${n} modif${n > 1 ? "s" : ""} en attente d'envoi`
+      : state.syncedAt ? `Synchro ${new Date(state.syncedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · ${state.rows.length} cdes` : "—";
+  }
+
+  // ---------- Écriture (affichage immédiat, envoi en arrière-plan) ----------
+  // values = [A..G] (date en numéro de série Excel) ; null = ne pas toucher la cellule
   // rowNum = null pour une nouvelle commande ; expect = modèle attendu sur la ligne (garde-fou)
   async function writeRow(rowNum, values, expect) {
+    const isNew = !rowNum;
+    if (isNew) rowNum = state.lastUsedRow + 1;
     if (state.source === "sheet") {
       const send = values.slice();
       if (send[0] !== null) { const d = serialToDate(send[0]); send[0] = [d.getFullYear(), d.getMonth() + 1, d.getDate()]; }
-      const res = rowNum
-        ? await api.call({ action: "update", row: rowNum, expect, values: send })
-        : await api.call({ action: "add", values: send });
-      rowNum = res.row;
-    } else if (!rowNum) {
-      rowNum = state.lastUsedRow + 1;
+      enqueue(isNew ? { action: "add", values: send, localRow: rowNum } : { action: "update", row: rowNum, expect, values: send });
     }
     const m = state.matrix;
     // Le script crée la colonne "Payé" au premier usage : même chose sur la copie locale
@@ -200,7 +247,7 @@
   }
 
   async function deleteRow(r) {
-    if (state.source === "sheet") await api.call({ action: "delete", row: r.r, expect: r.model });
+    if (state.source === "sheet") enqueue({ action: "delete", row: r.r, expect: r.model });
     // Même opération sur la copie locale : la ligne suivante garde sa date si elle en héritait
     const m = state.matrix, i = r.r - 1, next = m[i + 1];
     const own = (m[i] || [])[0];
@@ -289,6 +336,12 @@
   // ---------- Chargement ----------
   async function refresh(silent) {
     if (state.source !== "sheet") { if (!silent) toast("Mode fichier : rouvre le fichier pour actualiser"); return false; }
+    if (queue.items.length || queue.busy) {
+      queue.wantRefresh = true;
+      runQueue();
+      if (!silent) toast("Envoi des modifications en cours…");
+      return false;
+    }
     const btn = $("#btnRefresh");
     btn.classList.add("spin");
     try {
@@ -473,9 +526,7 @@
   }
 
   function renderAll() {
-    $("#syncInfo").textContent = state.source === "file"
-      ? `Fichier : ${state.fileName}`
-      : state.syncedAt ? `Synchro ${new Date(state.syncedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · ${state.rows.length} cdes` : "—";
+    renderSync();
     renderHome();
     if (state.view === "history") filterHistory();
     if (state.view === "stats") renderStats();
