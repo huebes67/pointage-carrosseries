@@ -42,11 +42,28 @@
   }
 
   // ---------- Normalisation modèles / couleurs ----------
-  const MODEL_ALIASES = [[/\bgranite\b/g, "granit"], [/\bporshe\b/g, "porsche"], [/\bkkpit\b/g, "kpit"], [/\bcoxmaxx\b/g, "cox maxx"], [/\bsc ?370\b/g, "sc 370"], [/\bstpro\b/g, "st pro"], [/\b205 ?gti\b/g, "205 gti"], [/\bbig ?mama\b/g, "big mama"], [/\bchargeur\b/g, "charger"]];
+  // Regroupement des différentes écritures d'un même modèle (le tableau n'est pas modifié)
+  const MODEL_ALIASES = [
+    [/\bshort ?course\b/g, "sc"], [/\bgranite\b/g, "granit"], [/\bporshe\b/g, "porsche"], [/\bkkpit\b/g, "kpit"],
+    [/\bcoxmaxx\b/g, "cox maxx"], [/\bsc ?370\b/g, "sc 370"], [/\bste? ?pro\b/g, "st pro"], [/\bbig ?mama\b/g, "big mama"],
+    [/\bbig ?rock\b/g, "big rock"], [/\b(205|250) ?gti\b/g, "205 gti"], [/\bx ?monster\b/g, "x monster"],
+    [/\berevo ?2 ?pro\b/g, "erevo 2 pro"], [/\berevo 2\.0\b/g, "erevo 2"], [/\b(mojave|mojito) ?4 ?s\b/g, "$1 4s"],
+    [/\bpick ?up\b/g, "pick up"], [/\bhoos\b/g, "hoss"], [/^gorgon$/, "gorgonzola"], [/\bcox gold ?m\b/g, "cox gold m"],
+    [/\baggressif\b/g, "agressif"], [/\btekkno\b/g, "tekno"], [/^chargeur$/, "dodge chargeur"], [/\bempattement\b/g, ""],
+    [/\bnew\b/g, "nouveau"], [/\bl ancien model\b/g, "ancien"], [/^chevy 80\b/, "chevy 1980"], [/\bxmax\b/g, "xmaxx"],
+    [/\btm\b/g, "team magic"], [/\beb 6\b/g, "eb6"], [/^eb6$/, "team magic eb6"], [/\bcox 1\/0\b/g, "cox 1/10"],
+  ];
+  const MODEL_STOPWORDS = new Set(["du", "de", "la", "le", "et", "l", "d"]);
+  // Nom affiché imposé pour certains groupes (sinon : l'écriture la plus fréquente)
+  const MODEL_DISPLAY = {
+    "chargeur dodge": "Dodge chargeur", "eb6 magic team": "Team magic EB6",
+    "1/8 ancien truggy": "Truggy 1/8 ancien", "1/10 porsche": "Porsche 1/10",
+  };
   function modelKey(s) {
     let k = fold(s);
     for (const [re, to] of MODEL_ALIASES) k = k.replace(re, to);
-    return k;
+    // l'ordre des mots ne compte pas : "chargeur dodge" = "dodge chargeur"
+    return k.split(/\s+/).filter((w) => w && !MODEL_STOPWORDS.has(w)).sort().join(" ");
   }
 
   const COLORS = {
@@ -124,7 +141,7 @@
     const display = {};
     for (const k in variants) {
       const best = Object.entries(variants[k]).sort((x, y) => y[1] - x[1])[0][0];
-      display[k] = best.charAt(0).toUpperCase() + best.slice(1);
+      display[k] = MODEL_DISPLAY[k] || best.charAt(0).toUpperCase() + best.slice(1);
     }
     for (const r of rows) r.name = display[r.key];
     state.rows = rows;
