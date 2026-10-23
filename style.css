@@ -252,7 +252,8 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 }
 .color-pick button.active { border-color: var(--accent); color: var(--text); background: rgba(255,122,26,.08); }
 .suggest { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.suggest button { font-size: 12.5px; padding: 6px 10px; border-radius: 999px; background: var(--card); color: var(--muted); }
+.suggest button { font-size: 14px; font-weight: 650; padding: 9px 13px; border-radius: 999px; background: var(--card-2); color: var(--text); border: 1px solid var(--line); }
+.suggest button:active { background: rgba(255,122,26,.18); border-color: var(--accent); }
 .switch-row { display: flex; align-items: center; justify-content: space-between; background: var(--card); border-radius: 13px; padding: 12px 14px; }
 .switch { width: 50px; height: 30px; border-radius: 15px; background: var(--line); position: relative; transition: background .2s; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: transform .2s; }

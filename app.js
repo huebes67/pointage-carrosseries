@@ -621,12 +621,21 @@
   const COLOR_CHOICES = ["Noir", "Blanc", "Bleu", "Jaune", "Rouge", "Vert"];
   function openForm(r) {
     const isNew = !r;
-    const topModels = (() => {
+    // Modèles connus, les plus commandés d'abord (la dernière année compte double)
+    const models = (() => {
       const c = {}; const from = addDays(today(), -365);
-      for (const x of state.rows) if (x.date && x.date > from) c[x.name] = (c[x.name] || 0) + 1;
-      return Object.entries(c).sort((a, b) => b[1] - a[1]).map((e) => e[0]);
+      for (const x of state.rows) c[x.name] = (c[x.name] || 0) + (x.date && x.date > from ? 2 : 1);
+      return Object.entries(c).sort((a, b) => b[1] - a[1]).map(([name]) => ({ name, words: fold(name).split(/[\s/.-]+/).filter(Boolean) }));
     })();
-    const allModels = [...new Set(state.rows.map((x) => x.name))].sort((a, b) => a.localeCompare(b, "fr"));
+    // "pi fin" -> chaque mot tapé doit être le début d'un mot du modèle
+    const suggestModels = (q) => {
+      const terms = fold(q).split(/\s+/).filter(Boolean);
+      if (!terms.length) return models.slice(0, 8);
+      return models.filter((m) => terms.every((t) => m.words.some((w) => w.startsWith(t)) || fold(m.name).replace(/\s/g, "").startsWith(t)))
+        .filter((m) => fold(m.name) !== fold(q))
+        .slice(0, 8);
+    };
+    const suggestHtml = (list) => list.map((m) => `<button type="button" data-model="${esc(m.name)}">${esc(m.name)}</button>`).join("");
     const curColor = r ? r.color : "Noir";
     const isOther = r && r.color && !COLOR_CHOICES.includes(r.color);
     openSheet(`
@@ -636,9 +645,8 @@
         <div class="field"><label>Date de commande</label>
           <input type="date" name="date" value="${isoDate(r ? r.date || today() : today())}" required></div>
         <div class="field"><label>Modèle</label>
-          <input name="model" list="modelList" placeholder="Ex : Maxx v2" value="${esc(r ? r.model : "")}" required>
-          <datalist id="modelList">${allModels.map((m) => `<option value="${esc(m)}">`).join("")}</datalist>
-          ${isNew ? `<div class="suggest">${topModels.slice(0, 8).map((m) => `<button type="button" data-model="${esc(m)}">${esc(m)}</button>`).join("")}</div>` : ""}
+          <input name="model" placeholder="Tape les premières lettres : pi, max, cox…" value="${esc(r ? r.model : "")}" required autocomplete="off" autocapitalize="sentences">
+          <div class="suggest" id="modelSuggest">${isNew ? suggestHtml(suggestModels("")) : ""}</div>
         </div>
         <div class="field"><label>Couleur</label>
           <div class="color-pick">
@@ -657,10 +665,11 @@
       </form>`);
 
     const form = $("#orderForm");
+    form.model.addEventListener("input", () => { $("#modelSuggest").innerHTML = suggestHtml(suggestModels(form.model.value)); });
     let color = isOther ? "__other" : curColor;
     $("#sheetBody").onclick = (e) => {
       const m = e.target.closest("[data-model]");
-      if (m) { form.model.value = m.dataset.model; return; }
+      if (m) { form.model.value = m.dataset.model; $("#modelSuggest").innerHTML = ""; return; }
       const c = e.target.closest("[data-color]");
       if (c) {
         // Même couleur touchée une 2e fois = aucune couleur
