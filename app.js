@@ -68,6 +68,15 @@
     return `<i class="swatch ${cls}" style="--sw:${bg}"></i>`;
   };
 
+  // Bande en haut de la tuile, de la couleur de la carrosserie
+  const colorBand = (name) => {
+    if (!name) return "";
+    const c = COLORS[name];
+    const light = name === "Blanc" || name === "Jaune";
+    const bg = c || "linear-gradient(90deg,#e5383b,#f5c518,#2fb36d,#2f7cf6)";
+    return `<div class="cband${name === "Noir" ? " noir" : ""}" style="--c:${bg};--t:${light ? "#15161a" : "#fff"}">${esc(name)}</div>`;
+  };
+
   // ---------- État ----------
   const state = {
     rows: [],          // commandes (lignes avec un modèle)
@@ -352,10 +361,10 @@
     else if (u.left === 0) { n = "0"; lbl = "dernier jour"; }
     else { n = u.left; lbl = u.left > 1 ? "jours restants" : "jour restant"; }
     const pct = u.cls === "unknown" ? 0 : Math.min(100, Math.max(4, (u.age / cfg().delai) * 100));
-    return swipeWrap(r, "card", `<button class="job sw-front ${u.cls}" data-row="${r.r}">
+    return swipeWrap(r, "card", `<button class="job sw-front ${u.cls} ${r.color ? "has-band" : ""}" data-row="${r.r}">
+      ${colorBand(r.color)}
       <div class="job-title">${esc(r.name)}</div>
       <div class="job-meta">
-        ${r.color ? `<span class="tag">${swatch(r.color)}${esc(r.color)}</span>` : ""}
         <span>${r.date ? "Cdé le " + fmt(r.date, { day: "numeric", month: "short" }) : "Date inconnue"}</span>
         ${payPill(r)}
       </div>

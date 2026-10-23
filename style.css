@@ -91,14 +91,13 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .job {
   position: relative; overflow: hidden;
   display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
-  background: var(--card); border-radius: var(--radius); padding: 16px 14px 16px 20px;
+  background: var(--card); border-radius: var(--radius); padding: 16px;
   border: 1px solid rgba(255,255,255,.03); text-align: left; width: 100%;
 }
-.job::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--u); }
 .job.ok { --u: var(--ok); } .job.warn { --u: var(--warn); } .job.hot { --u: var(--hot); }
 .job.late { --u: var(--late); background: linear-gradient(90deg, rgba(200,30,74,.16), transparent 55%) var(--card); }
 .job.unknown { --u: var(--muted); }
-.job-title { font-weight: 750; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+.job-title { font-weight: 750; font-size: 18px; flex-wrap: wrap; display: flex; align-items: center; gap: 8px; }
 .job-meta { grid-column: 1; color: var(--muted); font-size: 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .job-note { grid-column: 1 / -1; font-size: 14px; color: #c9cfdc; background: rgba(255,255,255,.04); border-radius: 10px; padding: 7px 10px; margin-top: 4px; word-break: break-word; }
 .countdown {
@@ -322,3 +321,13 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .sw-done { left: 0; width: 60%; background: var(--ok); color: #04210f; justify-content: flex-start; }
 .sw-del { right: 0; width: 60%; background: var(--hot); justify-content: flex-end; }
 .swipe[data-dir="right"] .sw-del, .swipe[data-dir="left"] .sw-done, .swipe:not([data-dir]) .sw-act, .swipe[data-dir=""] .sw-act { visibility: hidden; }
+
+/* ---------- Bande couleur de la carrosserie (haut de la tuile) ---------- */
+.cband {
+  grid-column: 1 / -1; margin: -16px -16px 8px; padding: 6px 16px;
+  background: var(--c); color: var(--t); font-size: 13px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.25);
+}
+.cband.noir { background: #050506; box-shadow: inset 0 -1.5px 0 rgba(255,255,255,.35); }
+.row > .swatch { width: 22px; height: 22px; }
+.job.has-band .countdown { grid-row: 2 / span 2; }
