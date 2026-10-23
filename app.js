@@ -871,7 +871,8 @@
   }
 
   // ---------- Page de chargement ----------
-  // Visible au moins 0,9 s (le temps de l'animation), retirée en fondu dès que l'atelier est prêt
+  // Visible au moins 1,3 s à partir de son affichage (le temps de l'animation), puis fondu dès que l'atelier est prêt
+  const splashShownAt = performance.now();
   let splashDone = false;
   function hideSplash() {
     if (splashDone) return;
@@ -881,7 +882,7 @@
     setTimeout(() => {
       s.classList.add("out");
       setTimeout(() => s.remove(), 500);
-    }, Math.max(0, 900 - performance.now()));
+    }, Math.max(0, 1300 - (performance.now() - splashShownAt)));
   }
   setTimeout(hideSplash, 6000); // sécurité si le réseau ne répond pas
 
