@@ -73,7 +73,7 @@
     if (!name) return "";
     const c = COLORS[name];
     const light = name === "Blanc" || name === "Jaune";
-    const bg = c || "linear-gradient(90deg,#e5383b,#f5c518,#2fb36d,#2f7cf6)";
+    const bg = c || "#5b6275"; // couleur non standard : gris uni avec son nom
     return `<div class="cband${name === "Noir" ? " noir" : ""}" style="--c:${bg};--t:${light ? "#15161a" : "#fff"}">${esc(name)}</div>`;
   };
 
