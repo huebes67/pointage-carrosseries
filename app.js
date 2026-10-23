@@ -605,7 +605,9 @@
     $("#sheetBody").onclick = (e) => {
       const c = e.target.closest("[data-color]");
       if (c) {
-        if (c.dataset.color !== r.color) save([null, null, null, c.dataset.color, null, null, null], `Couleur : ${c.dataset.color}`);
+        // Même couleur touchée une 2e fois = on enlève la couleur
+        if (c.dataset.color === r.color) save([null, null, null, "", null, null, null], "Couleur enlevée");
+        else save([null, null, null, c.dataset.color, null, null, null], `Couleur : ${c.dataset.color}`);
         return;
       }
       const act = e.target.closest("[data-act]")?.dataset.act;
@@ -661,8 +663,9 @@
       if (m) { form.model.value = m.dataset.model; return; }
       const c = e.target.closest("[data-color]");
       if (c) {
-        color = c.dataset.color;
-        $$(".color-pick button", form).forEach((b) => b.classList.toggle("active", b === c));
+        // Même couleur touchée une 2e fois = aucune couleur
+        color = c.classList.contains("active") ? "" : c.dataset.color;
+        $$(".color-pick button", form).forEach((b) => b.classList.toggle("active", b === c && color !== ""));
         form.colorOther.hidden = color !== "__other";
         if (color === "__other") form.colorOther.focus();
         return;
