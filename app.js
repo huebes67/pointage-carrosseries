@@ -871,37 +871,18 @@
     });
   }
 
-  // ---------- Page de chargement ----------
-  // Visible au moins 1,3 s à partir de son affichage (le temps de l'animation), puis fondu dès que l'atelier est prêt
-  const splashShownAt = performance.now();
-  let splashDone = false;
-  function hideSplash() {
-    if (splashDone) return;
-    splashDone = true;
-    const s = $("#splash");
-    if (!s) return;
-    setTimeout(() => {
-      s.classList.add("out");
-      setTimeout(() => s.remove(), 500);
-    }, Math.max(0, 1300 - (performance.now() - splashShownAt)));
-  }
-  setTimeout(hideSplash, 6000); // sécurité si le réseau ne répond pas
-
   // ---------- Démarrage ----------
   (function start() {
     if (api.ready()) {
       state.source = "sheet";
       const cache = LS.get("pc_cache", null);
-      const hasCache = !!(cache && cache.matrix);
-      if (hasCache) { state.syncedAt = cache.at; buildRows(cache.matrix); }
+      if (cache && cache.matrix) { state.syncedAt = cache.at; buildRows(cache.matrix); }
       renderAll();
-      if (hasCache) hideSplash();
-      refresh(true).finally(hideSplash);
+      refresh(true);
       return;
     }
     renderAll();
     $("#welcome").hidden = false;
-    hideSplash();
   })();
 
   // Web-app installable : cache de l'interface (inutile dans l'APK)
