@@ -84,6 +84,8 @@
   function buildRows(matrix) {
     const rows = [];
     let carry = null, lastUsed = 1;
+    // Colonne G "Payé" seulement si son titre est présent (sinon G contient d'autres tableaux)
+    const hasPay = fold((matrix[0] || [])[6]) === "paye";
     for (let i = 1; i < matrix.length; i++) {
       const a = matrix[i] || [];
       const v = (j) => (a[j] === "" || a[j] === undefined ? null : a[j]);
@@ -104,6 +106,7 @@
         color: colorName(v(3)),
         client: clean(v(4)),
         obs: clean(v(5)),
+        pay: hasPay ? payState(v(6)) : "",
       });
     }
     // Nom affiché = variante la plus fréquente de chaque modèle
@@ -119,6 +122,17 @@
     state.lastUsedRow = lastUsed;
     state.matrix = matrix;
   }
+
+  // "" = non renseigné (anciennes commandes) · "paid" · "unpaid"
+  function payState(raw) {
+    const f = fold(raw);
+    if (!f) return "";
+    if (f.startsWith("non") || f === "n") return "unpaid";
+    if (f.startsWith("pay") || f === "oui" || f === "p") return "paid";
+    return "";
+  }
+  const PAY_VALUE = { paid: "Payé", unpaid: "Non payé" };
+  const payPill = (r) => r.pay ? `<span class="pay ${r.pay}">€ ${r.pay === "paid" ? "Payée" : "Non payée"}</span>` : "";
 
   function urgency(r) {
     if (r.done) return null;
@@ -166,6 +180,8 @@
       rowNum = state.lastUsedRow + 1;
     }
     const m = state.matrix;
+    // Le script crée la colonne "Payé" au premier usage : même chose sur la copie locale
+    if (values[6] != null && fold((m[0] || [])[6]) !== "paye") m[0] = Object.assign((m[0] || []).slice(), { 6: "Payé" });
     while (m.length < rowNum) m.push([]);
     const row = m[rowNum - 1] = (m[rowNum - 1] || []).slice();
     values.forEach((v, j) => { if (v !== null) row[j] = v; });
@@ -211,7 +227,7 @@
       const name = wb.SheetNames.find((n) => fold(n) === "commande") || wb.SheetNames[0];
       const ws = wb.Sheets[name];
       const ref = XLSX.utils.decode_range(ws["!ref"] || "A1:F1");
-      const m = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true, range: { s: { r: 0, c: 0 }, e: { r: ref.e.r, c: 5 } } });
+      const m = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true, range: { s: { r: 0, c: 0 }, e: { r: ref.e.r, c: 6 } } });
       state.source = "file";
       state.fileName = file.name;
       state.syncedAt = Date.now();
@@ -233,14 +249,13 @@
     todo.sort((a, b) => (a.r.date ? a.r.date : Infinity) - (b.r.date ? b.r.date : Infinity) || a.r.r - b.r.r);
     const late = todo.filter((x) => x.u.cls === "late").length;
     const month = state.rows.filter((r) => r.date && r.date.getMonth() === t.getMonth() && r.date.getFullYear() === t.getFullYear()).length;
-    const yearAgo = addDays(t, -365);
-    const perMonth = Math.round(state.rows.filter((r) => r.date && r.date > yearAgo).length / 12);
+    const unpaid = state.rows.filter((r) => r.pay === "unpaid").length;
 
     $("#kpis").innerHTML = `
       <div class="kpi accent"><div class="v">${todo.length}</div><div class="l">À fabriquer</div></div>
       <div class="kpi ${late ? "danger" : ""}"><div class="v">${late}</div><div class="l">En retard (&gt; ${cfg().delai} j)</div></div>
-      <div class="kpi"><div class="v">${month}</div><div class="l">Commandes en ${fmt(t, { month: "long" })}</div></div>
-      <div class="kpi"><div class="v">${perMonth}</div><div class="l">Moyenne / mois (1 an)</div></div>`;
+      <button class="kpi ${unpaid ? "warn" : ""}" data-goto="unpaid"><div class="v">${unpaid}</div><div class="l">Non payées</div></button>
+      <div class="kpi"><div class="v">${month}</div><div class="l">Commandes en ${fmt(t, { month: "long" })}</div></div>`;
 
     $("#todoList").innerHTML = todo.length ? todo.map(({ r, u }) => jobCard(r, u)).join("") :
       `<div class="empty"><b>Tout est fabriqué 🎉</b>Aucune commande en attente.</div>`;
@@ -261,8 +276,9 @@
       <div class="job-meta">
         ${r.color ? `<span class="tag">${swatch(r.color)}${esc(r.color)}</span>` : ""}
         <span>${r.date ? "Cdé le " + fmt(r.date, { day: "numeric", month: "short" }) : "Date inconnue"}</span>
-        ${r.client ? `<span>· ${esc(r.client)}</span>` : ""}
+        ${payPill(r)}
       </div>
+      ${r.client || r.obs ? `<div class="job-note">${esc([r.client, r.obs].filter(Boolean).join(" · "))}</div>` : ""}
       <div class="countdown"><div class="n">${n}</div><div class="t">${lbl}</div></div>
       <div class="progress"><i style="width:${pct}%"></i></div>
     </button>`;
@@ -277,7 +293,10 @@
         <div class="row-title">${esc(r.name)}</div>
         <div class="row-sub">${esc(sub || fmt(r.date))}</div>
       </div>
-      <span class="status ${r.done ? "done" : "todo"}">${r.done ? "Faite" : "À faire"}</span>
+      <div class="row-side">
+        <span class="status ${r.done ? "done" : "todo"}">${r.done ? "Faite" : "À faire"}</span>
+        ${payPill(r)}
+      </div>
     </button>`;
   }
 
@@ -290,8 +309,9 @@
     state.hist.list = state.rows.filter((r) => {
       if (st === "todo" && r.done) return false;
       if (st === "done" && !r.done) return false;
+      if (st === "unpaid" && r.pay !== "unpaid") return false;
       if (!terms.length) return true;
-      const hay = fold([r.name, r.model, r.colorRaw, r.color, r.client, r.obs, r.date ? fmt(r.date, { day: "numeric", month: "long", year: "numeric" }) : ""].join(" "));
+      const hay = fold([r.name, r.model, r.colorRaw, r.color, r.client, r.obs, r.pay === "unpaid" ? "non payee" : r.pay === "paid" ? "payee" : "", r.date ? fmt(r.date, { day: "numeric", month: "long", year: "numeric" }) : ""].join(" "));
       return terms.every((t) => hay.includes(t));
     }).reverse();
     state.hist.shown = 0;
@@ -384,41 +404,65 @@
   function closeSheet() { $("#sheet").hidden = true; $("#sheetBackdrop").hidden = true; }
   const sheetOpen = () => !$("#sheet").hidden;
 
+  // Fiche d'actions rapides : un appui = une modification enregistrée
   function openDetail(rowNum) {
     const r = state.rows.find((x) => x.r === rowNum);
     if (!r) return;
     const u = urgency(r);
-    let statut = "Faite ✓";
+    let statut = "Fabriquée ✓";
     if (u) statut = u.cls === "unknown" ? "À faire" : u.left < 0 ? `En retard de ${-u.left} j` : `À faire · ${u.left} j restant${u.left > 1 ? "s" : ""}`;
+    const payTxt = r.pay === "paid" ? "Payée" : r.pay === "unpaid" ? "Non payée" : "Non renseigné";
     openSheet(`
       <div class="detail-head">
         ${swatch(r.color, "lg")}
         <div><h3>${esc(r.name)}</h3><span class="status ${r.done ? "done" : "todo"}" ${u ? `style="--u:var(--${u.cls === "unknown" ? "muted" : u.cls})"` : ""}>${esc(statut)}</span></div>
       </div>
+      <div class="quick">
+        <button class="qbtn ${r.done ? "on-done" : ""}" data-act="done">
+          <span class="ico">${r.done ? "✓" : "🔧"}</span>${r.done ? "Fabriquée" : "Marquer fabriquée"}<small>${r.done ? "appuyer pour annuler" : "en cours"}</small>
+        </button>
+        <button class="qbtn ${r.pay === "paid" ? "on-paid" : r.pay === "unpaid" ? "on-unpaid" : ""}" data-act="pay">
+          <span class="ico">€</span>${payTxt}<small>appuyer pour changer</small>
+        </button>
+      </div>
+      <div class="qlabel">Couleur</div>
+      <div class="qcolors">
+        ${COLOR_CHOICES.map((c) => `<button data-color="${c}" class="${r.color === c ? "active" : ""}" aria-label="${c}">${swatch(c, "lg")}</button>`).join("")}
+      </div>
+      <div class="qlabel">Client / note</div>
+      <div class="qnote">
+        <textarea id="qNote" placeholder="Ex : Julien mail, payé virement…">${esc(r.client)}</textarea>
+        <button data-act="note">OK</button>
+      </div>
       <div class="detail-grid">
         <div class="cell"><div class="k">Commandé le</div><div class="v">${fmt(r.date)}${r.ownDate ? "" : " <span class='muted'>(ligne du dessus)</span>"}</div></div>
         <div class="cell"><div class="k">Échéance (${cfg().delai} j)</div><div class="v">${r.date ? fmt(addDays(r.date, cfg().delai)) : "—"}</div></div>
-        <div class="cell"><div class="k">Couleur</div><div class="v">${esc(r.colorRaw || "—")}</div></div>
-        <div class="cell"><div class="k">Ligne Excel</div><div class="v">${r.r}</div></div>
-        <div class="cell full"><div class="k">Client / note</div><div class="v">${esc(r.client || "—")}</div></div>
-        <div class="cell full"><div class="k">Observations</div><div class="v">${esc(r.obs || "—")}</div></div>
+        ${r.obs ? `<div class="cell full"><div class="k">Observations</div><div class="v">${esc(r.obs)}</div></div>` : ""}
       </div>
-      <div class="btns">
-        ${r.done
-          ? `<button class="btn ghost" data-act="undone">Remettre « à faire »</button>`
-          : `<button class="btn success" data-act="done">✓ Marquer comme faite</button>`}
-        <button class="btn" data-act="edit">Modifier</button>
-      </div>`);
-    $("#sheetBody").onclick = async (e) => {
-      const act = e.target.closest("[data-act]")?.dataset.act;
-      if (!act) return;
-      if (act === "edit") return openForm(r);
-      const btn = e.target.closest("button"); btn.disabled = true;
+      <button class="btn ghost" data-act="edit" style="width:100%">Tout modifier (date, modèle, observations…)</button>`);
+
+    const save = async (values, msg, close) => {
+      $$("#sheetBody button").forEach((b) => (b.disabled = true));
       try {
-        await writeRow(r.r, [null, act === "done" ? "F" : "", null, null, null, null], r.model);
-        closeSheet();
-        toast(act === "done" ? `${r.name} fabriquée ✓` : "Remise à faire");
-      } catch (err) { btn.disabled = false; toast("Échec : " + err.message, true); }
+        await writeRow(r.r, values, r.model);
+        toast(msg);
+        if (close) closeSheet(); else openDetail(r.r);
+      } catch (err) {
+        $$("#sheetBody button").forEach((b) => (b.disabled = false));
+        toast("Échec : " + err.message, true);
+      }
+    };
+    $("#sheetBody").onclick = (e) => {
+      const c = e.target.closest("[data-color]");
+      if (c) {
+        if (c.dataset.color !== r.color) save([null, null, null, c.dataset.color, null, null, null], `Couleur : ${c.dataset.color}`);
+        return;
+      }
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "edit") return openForm(r);
+      if (act === "done") return save([null, r.done ? "" : "F", null, null, null, null, null], r.done ? "Remise en cours" : `${r.name} fabriquée ✓`, !r.done);
+      if (act === "pay") return save([null, null, null, null, null, null, PAY_VALUE[r.pay === "paid" ? "unpaid" : "paid"]], r.pay === "paid" ? "Non payée" : "Payée ✓");
+      if (act === "note") return save([null, null, null, null, clean($("#qNote").value), null, null], "Note enregistrée ✓");
     };
   }
 
@@ -455,6 +499,7 @@
           <input name="client" placeholder="Ex : Julien mail" value="${esc(r ? r.client : "")}"></div>
         <div class="field"><label>Observations</label>
           <textarea name="obs" placeholder="Optionnel">${esc(r ? r.obs : "")}</textarea></div>
+        <div class="switch-row"><span>Payée</span><button type="button" class="switch ${!r || r.pay !== "unpaid" ? "on" : ""}" id="paySwitch" aria-label="Payée"></button></div>
         <div class="switch-row"><span>Déjà fabriquée</span><button type="button" class="switch ${r && r.done ? "on" : ""}" id="doneSwitch" aria-label="Déjà fabriquée"></button></div>
         <button class="btn primary" type="submit">${isNew ? "Ajouter la commande" : "Enregistrer"}</button>
       </form>`);
@@ -472,7 +517,7 @@
         if (color === "__other") form.colorOther.focus();
         return;
       }
-      if (e.target.id === "doneSwitch") e.target.classList.toggle("on");
+      if (e.target.id === "doneSwitch" || e.target.id === "paySwitch") e.target.classList.toggle("on");
     };
     form.onsubmit = async (e) => {
       e.preventDefault();
@@ -482,7 +527,10 @@
       const colorVal = color === "__other" ? clean(form.colorOther.value) : color;
       const done = $("#doneSwitch").classList.contains("on") ? "F" : "";
       const dateChanged = isNew || !r.date || r.date.getTime() !== date.getTime();
-      const values = [dateChanged ? dateToSerial(date) : null, done, clean(form.model.value), colorVal, clean(form.client.value), clean(form.obs.value)];
+      const payOn = $("#paySwitch").classList.contains("on");
+      // Ancienne commande sans info de paiement : on ne touche pas la colonne si l'interrupteur n'a pas bougé
+      const pay = !isNew && !r.pay && payOn ? null : PAY_VALUE[payOn ? "paid" : "unpaid"];
+      const values = [dateChanged ? dateToSerial(date) : null, done, clean(form.model.value), colorVal, clean(form.client.value), clean(form.obs.value), pay];
       try {
         await writeRow(isNew ? null : r.r, values, isNew ? null : r.model);
         closeSheet();
@@ -568,6 +616,12 @@
   $("#btnSettings").onclick = openSettings;
   $("#sheetBackdrop").onclick = closeSheet;
   $("#main").addEventListener("click", (e) => {
+    const go = e.target.closest("[data-goto]");
+    if (go) {
+      state.hist.status = go.dataset.goto;
+      $$("#statusChips .chip").forEach((c) => c.classList.toggle("active", c.dataset.status === go.dataset.goto));
+      return show("history");
+    }
     const el = e.target.closest("[data-row]");
     if (el) openDetail(Number(el.dataset.row));
   });
