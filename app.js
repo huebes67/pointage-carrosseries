@@ -1,0 +1,670 @@
+/* Pointage Carrosseries — lit et modifie la feuille "Commande" du fichier Excel.
+   Colonnes : A Date · B Faite ("F") · C Modèle · D Couleur · E Client / note · F Observations */
+(function () {
+  "use strict";
+
+  // ---------- Réglages ----------
+  const LS = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* stockage plein ou bloqué */ } },
+    del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+  };
+  const base = window.APP_CONFIG || {};
+  const cfg = () => ({
+    clientId: LS.get("pc_clientId", base.CLIENT_ID || ""),
+    shareLink: LS.get("pc_shareLink", base.SHARE_LINK || ""),
+    delai: Number(LS.get("pc_delai", base.DELAI_JOURS || 10)) || 10,
+  });
+  const SCOPES = ["Files.ReadWrite.All"];
+  const MAX_ROWS = 6000;
+  // Adresse de retour après connexion : doit être déclarée telle quelle dans Azure.
+  const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
+
+  // ---------- Outils ----------
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const clean = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+  const fold = (s) => clean(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const DAY = 86400000;
+
+  const serialToDate = (n) => { const d = new Date(Math.round((n - 25569) * DAY)); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); };
+  const dateToSerial = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY + 25569;
+  const today = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const diffDays = (a, b) => Math.round((b - a) / DAY);
+  const fmt = (d, o = { day: "numeric", month: "short", year: "numeric" }) => d ? d.toLocaleDateString("fr-FR", o) : "—";
+  const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  function parseCellDate(v) {
+    if (typeof v === "number" && v > 20000 && v < 80000) return serialToDate(v);
+    if (typeof v === "string") {
+      const m = v.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+      if (m) return new Date(+(m[3].length === 2 ? "20" + m[3] : m[3]), +m[2] - 1, +m[1]);
+    }
+    return null;
+  }
+
+  // ---------- Normalisation modèles / couleurs ----------
+  const MODEL_ALIASES = [[/\bgranite\b/g, "granit"], [/\bporshe\b/g, "porsche"], [/\bkkpit\b/g, "kpit"], [/\bcoxmaxx\b/g, "cox maxx"], [/\bsc ?370\b/g, "sc 370"], [/\bstpro\b/g, "st pro"], [/\b205 ?gti\b/g, "205 gti"], [/\bbig ?mama\b/g, "big mama"], [/\bchargeur\b/g, "charger"]];
+  function modelKey(s) {
+    let k = fold(s);
+    for (const [re, to] of MODEL_ALIASES) k = k.replace(re, to);
+    return k;
+  }
+
+  const COLORS = {
+    Noir: "#15161a", Blanc: "#f4f4f4", Bleu: "#2f7cf6", Jaune: "#f5c518", Rouge: "#e5383b", Vert: "#2fb36d",
+  };
+  const COLOR_WORDS = [
+    ["Noir", /^(n|net n)$|\bnoir/], ["Blanc", /^b$|\bblanc/], ["Vert", /^v$|\bvert/], ["Bleu", /\bbleu|^beu$/],
+    ["Jaune", /\bjaun/], ["Rouge", /\brouge/],
+  ];
+  function colorName(raw) {
+    const f = fold(raw);
+    if (!f) return "";
+    for (const [name, re] of COLOR_WORDS) if (re.test(f)) return name;
+    return clean(raw);
+  }
+  const swatch = (name, cls = "") => {
+    const c = COLORS[name];
+    const bg = c || (name ? "conic-gradient(#e5383b,#f5c518,#2fb36d,#2f7cf6,#e5383b)" : "transparent");
+    return `<i class="swatch ${cls}" style="--sw:${bg}"></i>`;
+  };
+
+  // ---------- État ----------
+  const state = {
+    rows: [],          // commandes (lignes avec un modèle)
+    lastUsedRow: 1,    // dernière ligne Excel utilisée (pour ajouter à la suite)
+    matrix: null,      // valeurs brutes A:F
+    source: null,      // "graph" | "file"
+    fileName: "",
+    syncedAt: null,
+    view: "home",
+    hist: { q: "", status: "all", list: [], shown: 0 },
+    topRange: "365",
+  };
+
+  function buildRows(matrix) {
+    const rows = [];
+    let carry = null, lastUsed = 1;
+    for (let i = 1; i < matrix.length; i++) {
+      const a = matrix[i] || [];
+      const v = (j) => (a[j] === "" || a[j] === undefined ? null : a[j]);
+      const own = parseCellDate(v(0));
+      if (own) carry = own;
+      if ([1, 2, 3, 4, 5].some((j) => v(j) !== null && clean(v(j)) !== "")) lastUsed = i + 1;
+      const model = clean(v(2));
+      if (!model) continue;
+      rows.push({
+        r: i + 1,
+        ownDate: own,
+        date: own || carry,
+        doneRaw: v(1),
+        done: clean(v(1)) !== "",
+        model,
+        key: modelKey(model),
+        colorRaw: clean(v(3)),
+        color: colorName(v(3)),
+        client: clean(v(4)),
+        obs: clean(v(5)),
+      });
+    }
+    // Nom affiché = variante la plus fréquente de chaque modèle
+    const variants = {};
+    for (const r of rows) { (variants[r.key] ||= {}); variants[r.key][r.model] = (variants[r.key][r.model] || 0) + 1; }
+    const display = {};
+    for (const k in variants) {
+      const best = Object.entries(variants[k]).sort((x, y) => y[1] - x[1])[0][0];
+      display[k] = best.charAt(0).toUpperCase() + best.slice(1);
+    }
+    for (const r of rows) r.name = display[r.key];
+    state.rows = rows;
+    state.lastUsedRow = lastUsed;
+    state.matrix = matrix;
+  }
+
+  function urgency(r) {
+    if (r.done) return null;
+    if (!r.date) return { cls: "unknown", age: 0, left: null };
+    const d = cfg().delai;
+    const age = diffDays(r.date, today());
+    const left = d - age;
+    const cls = left < 0 ? "late" : left <= 1 ? "hot" : left <= 4 ? "warn" : "ok";
+    return { cls, age, left, due: addDays(r.date, d) };
+  }
+
+  // ---------- Source : Microsoft (OneDrive / Excel en ligne) ----------
+  const graph = {
+    msal: null,
+    async init() {
+      const { clientId } = cfg();
+      if (!clientId || !window.msal) return false;
+      if (this.msal && this.msal._cid === clientId) return true;
+      this.msal = new msal.PublicClientApplication({
+        auth: { clientId, authority: "https://login.microsoftonline.com/common", redirectUri: APP_URL },
+        cache: { cacheLocation: "localStorage" },
+      });
+      this.msal._cid = clientId;
+      if (this.msal.initialize) await this.msal.initialize();
+      const res = await this.msal.handleRedirectPromise();
+      if (res && res.account) this.msal.setActiveAccount(res.account);
+      const acc = this.msal.getActiveAccount() || this.msal.getAllAccounts()[0];
+      if (acc) this.msal.setActiveAccount(acc);
+      return true;
+    },
+    account() { return this.msal && this.msal.getActiveAccount(); },
+    async login() { await this.msal.loginRedirect({ scopes: SCOPES, prompt: "select_account" }); },
+    async logout() {
+      const acc = this.account();
+      LS.del("pc_target");
+      if (acc) await this.msal.logoutRedirect({ account: acc, postLogoutRedirectUri: APP_URL });
+    },
+    async token() {
+      const account = this.account();
+      if (!account) throw new Error("Non connecté");
+      try {
+        return (await this.msal.acquireTokenSilent({ scopes: SCOPES, account })).accessToken;
+      } catch (e) {
+        if (e instanceof msal.InteractionRequiredAuthError) { await this.msal.acquireTokenRedirect({ scopes: SCOPES, account }); }
+        throw e;
+      }
+    },
+    async api(path, opts = {}) {
+      const res = await fetch("https://graph.microsoft.com/v1.0" + path, {
+        ...opts,
+        headers: { Authorization: "Bearer " + (await this.token()), "Content-Type": "application/json", ...(opts.headers || {}) },
+      });
+      if (!res.ok) {
+        let msg = res.status + "";
+        try { const j = await res.json(); msg = (j.error && (j.error.message || j.error.code)) || msg; } catch { /* corps vide */ }
+        const err = new Error(msg); err.status = res.status; throw err;
+      }
+      return res.status === 204 ? null : res.json();
+    },
+    async target() {
+      const { shareLink } = cfg();
+      const cached = LS.get("pc_target", null);
+      if (cached && cached.link === shareLink) return cached;
+      if (!shareLink) throw new Error("Lien de partage du fichier manquant (Réglages).");
+      const enc = "u!" + btoa(unescape(encodeURIComponent(shareLink))).replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
+      const item = await this.api(`/shares/${enc}/driveItem?$select=id,name,parentReference`);
+      const base = `/drives/${item.parentReference.driveId}/items/${item.id}/workbook`;
+      const ws = await this.api(`${base}/worksheets?$select=name`);
+      const sheet = (ws.value.find((w) => fold(w.name) === "commande") || ws.value[0]).name;
+      const t = { link: shareLink, base, sheet, name: item.name };
+      LS.set("pc_target", t);
+      return t;
+    },
+    sheetPath(t) { return `${t.base}/worksheets('${encodeURIComponent(t.sheet.replace(/'/g, "''"))}')`; },
+    async load() {
+      const t = await this.target();
+      const res = await this.api(`${this.sheetPath(t)}/range(address='A1:F${MAX_ROWS}')?$select=values`);
+      state.fileName = t.name;
+      return res.values;
+    },
+    async patch(address, body) {
+      const t = await this.target();
+      await this.api(`${this.sheetPath(t)}/range(address='${address}')`, { method: "PATCH", body: JSON.stringify(body) });
+    },
+  };
+
+  // ---------- Écriture (Microsoft ou fichier local en mémoire) ----------
+  // values = [A..F] ; null = ne pas toucher la cellule
+  async function writeRow(rowNum, values) {
+    if (state.source === "graph") {
+      if (values[0] !== null) await graph.patch(`A${rowNum}`, { values: [[values[0]]], numberFormat: [["dd/mm/yyyy"]] });
+      const rest = values.slice(1);
+      if (rest.some((v) => v !== null)) await graph.patch(`B${rowNum}:F${rowNum}`, { values: [rest] });
+    }
+    const m = state.matrix;
+    while (m.length < rowNum) m.push([]);
+    const row = m[rowNum - 1] = (m[rowNum - 1] || []).slice();
+    values.forEach((v, j) => { if (v !== null) row[j] = v; });
+    buildRows(m);
+    saveCache();
+    renderAll();
+  }
+
+  // ---------- Cache local (affichage instantané) ----------
+  function saveCache() {
+    if (state.source !== "graph") return;
+    LS.set("pc_cache", { matrix: state.matrix, at: state.syncedAt, name: state.fileName });
+  }
+
+  // ---------- Chargement ----------
+  async function refresh(silent) {
+    if (state.source !== "graph") { if (!silent) toast("Mode fichier : rouvre le fichier pour actualiser"); return; }
+    const btn = $("#btnRefresh");
+    btn.classList.add("spin");
+    try {
+      const m = await graph.load();
+      state.syncedAt = Date.now();
+      buildRows(m);
+      saveCache();
+      hideBanner();
+      renderAll();
+      if (!silent) toast("À jour ✓");
+    } catch (e) {
+      console.error(e);
+      banner("Impossible de lire le fichier : " + e.message, true);
+    } finally {
+      btn.classList.remove("spin");
+    }
+  }
+
+  async function openLocalFile(file) {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const name = wb.SheetNames.find((n) => fold(n) === "commande") || wb.SheetNames[0];
+      const ws = wb.Sheets[name];
+      const ref = XLSX.utils.decode_range(ws["!ref"] || "A1:F1");
+      const m = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true, range: { s: { r: 0, c: 0 }, e: { r: ref.e.r, c: 5 } } });
+      state.source = "file";
+      state.fileName = file.name;
+      state.syncedAt = Date.now();
+      buildRows(m);
+      $("#welcome").hidden = true;
+      banner("Mode fichier : les modifications restent sur l'appli, elles ne sont pas enregistrées dans Excel.");
+      renderAll();
+      toast(`${state.rows.length} commandes chargées`);
+    } catch (e) {
+      console.error(e);
+      toast("Fichier illisible : " + e.message, true);
+    }
+  }
+
+  // ---------- Rendu : Atelier ----------
+  function renderHome() {
+    const t = today();
+    const todo = state.rows.filter((r) => !r.done).map((r) => ({ r, u: urgency(r) }));
+    todo.sort((a, b) => (a.r.date ? a.r.date : Infinity) - (b.r.date ? b.r.date : Infinity) || a.r.r - b.r.r);
+    const late = todo.filter((x) => x.u.cls === "late").length;
+    const month = state.rows.filter((r) => r.date && r.date.getMonth() === t.getMonth() && r.date.getFullYear() === t.getFullYear()).length;
+    const yearAgo = addDays(t, -365);
+    const perMonth = Math.round(state.rows.filter((r) => r.date && r.date > yearAgo).length / 12);
+
+    $("#kpis").innerHTML = `
+      <div class="kpi accent"><div class="v">${todo.length}</div><div class="l">À fabriquer</div></div>
+      <div class="kpi ${late ? "danger" : ""}"><div class="v">${late}</div><div class="l">En retard (&gt; ${cfg().delai} j)</div></div>
+      <div class="kpi"><div class="v">${month}</div><div class="l">Commandes en ${fmt(t, { month: "long" })}</div></div>
+      <div class="kpi"><div class="v">${perMonth}</div><div class="l">Moyenne / mois (1 an)</div></div>`;
+
+    $("#todoList").innerHTML = todo.length ? todo.map(({ r, u }) => jobCard(r, u)).join("") :
+      `<div class="empty"><b>Tout est fabriqué 🎉</b>Aucune commande en attente.</div>`;
+
+    const recent = state.rows.filter((r) => r.done).slice(-6).reverse();
+    $("#recentList").innerHTML = recent.map((r, i) => rowHtml(r, i === recent.length - 1)).join("");
+  }
+
+  function jobCard(r, u) {
+    let n, lbl;
+    if (u.cls === "unknown") { n = "?"; lbl = "sans date"; }
+    else if (u.left < 0) { n = "+" + -u.left; lbl = -u.left > 1 ? "jours de retard" : "jour de retard"; }
+    else if (u.left === 0) { n = "0"; lbl = "dernier jour"; }
+    else { n = u.left; lbl = u.left > 1 ? "jours restants" : "jour restant"; }
+    const pct = u.cls === "unknown" ? 0 : Math.min(100, Math.max(4, (u.age / cfg().delai) * 100));
+    return `<button class="job ${u.cls}" data-row="${r.r}">
+      <div class="job-title">${esc(r.name)}</div>
+      <div class="job-meta">
+        ${r.color ? `<span class="tag">${swatch(r.color)}${esc(r.color)}</span>` : ""}
+        <span>${r.date ? "Cdé le " + fmt(r.date, { day: "numeric", month: "short" }) : "Date inconnue"}</span>
+        ${r.client ? `<span>· ${esc(r.client)}</span>` : ""}
+      </div>
+      <div class="countdown"><div class="n">${n}</div><div class="t">${lbl}</div></div>
+      <div class="progress"><i style="width:${pct}%"></i></div>
+    </button>`;
+  }
+
+  function rowHtml(r, last) {
+    const u = urgency(r);
+    const sub = [r.color, r.client, r.obs].filter(Boolean).join(" · ");
+    return `<button class="row ${last ? "last" : ""}" data-row="${r.r}" ${u ? `style="--u:var(--${u.cls === "unknown" ? "muted" : u.cls})"` : ""}>
+      ${swatch(r.color)}
+      <div class="row-main">
+        <div class="row-title">${esc(r.name)}</div>
+        <div class="row-sub">${esc(sub || fmt(r.date))}</div>
+      </div>
+      <span class="status ${r.done ? "done" : "todo"}">${r.done ? "Faite" : "À faire"}</span>
+    </button>`;
+  }
+
+  // ---------- Rendu : Historique ----------
+  const PAGE = 80;
+  function filterHistory() {
+    const q = fold(state.hist.q);
+    const terms = q.split(" ").filter(Boolean);
+    const st = state.hist.status;
+    state.hist.list = state.rows.filter((r) => {
+      if (st === "todo" && r.done) return false;
+      if (st === "done" && !r.done) return false;
+      if (!terms.length) return true;
+      const hay = fold([r.name, r.model, r.colorRaw, r.color, r.client, r.obs, r.date ? fmt(r.date, { day: "numeric", month: "long", year: "numeric" }) : ""].join(" "));
+      return terms.every((t) => hay.includes(t));
+    }).reverse();
+    state.hist.shown = 0;
+    $("#historyList").innerHTML = "";
+    $("#resultCount").textContent = `${state.hist.list.length} commande${state.hist.list.length > 1 ? "s" : ""}`;
+    moreHistory();
+  }
+
+  function moreHistory() {
+    const { list, shown } = state.hist;
+    if (shown >= list.length) return;
+    const slice = list.slice(shown, shown + PAGE);
+    const prev = list[shown - 1];
+    let html = "", lastKey = prev && prev.date ? prev.date.getTime() : "x";
+    slice.forEach((r, i) => {
+      const key = r.date ? r.date.getTime() : "none";
+      if (key !== lastKey) {
+        html += `<div class="day-head">${r.date ? fmt(r.date, { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "Sans date"}</div>`;
+        lastKey = key;
+      }
+      const next = slice[i + 1] || list[shown + PAGE];
+      const isLast = !next || (next.date ? next.date.getTime() : "none") !== key;
+      html += rowHtml(r, isLast);
+    });
+    $("#historyList").insertAdjacentHTML("beforeend", html);
+    state.hist.shown += slice.length;
+  }
+
+  // ---------- Rendu : Stats ----------
+  function renderStats() {
+    const t = today();
+    // Commandes par mois (12 mois)
+    const months = [];
+    for (let i = 11; i >= 0; i--) months.push(new Date(t.getFullYear(), t.getMonth() - i, 1));
+    const counts = months.map((m) => state.rows.filter((r) => r.date && r.date.getFullYear() === m.getFullYear() && r.date.getMonth() === m.getMonth()).length);
+    const max = Math.max(1, ...counts);
+    $("#chartMonths").innerHTML = `<div class="bars">${months.map((m, i) => `
+      <div class="bar"><span class="num">${counts[i]}</span>
+        <div class="col ${i === 11 ? "cur" : ""}" style="height:${(counts[i] / max) * 100}%"></div>
+        <span class="lab">${fmt(m, { month: "short" }).replace(".", "")}</span></div>`).join("")}</div>`;
+
+    // Top modèles
+    const from = state.topRange === "all" ? null : addDays(t, -365);
+    const scope = state.rows.filter((r) => !from || (r.date && r.date > from));
+    const byModel = {};
+    for (const r of scope) byModel[r.name] = (byModel[r.name] || 0) + 1;
+    const top = Object.entries(byModel).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const tmax = top.length ? top[0][1] : 1;
+    $("#chartModels").innerHTML = `<div class="hbars">${top.map(([n, c]) => `
+      <div class="hbar"><span class="name">${esc(n)}</span><div class="track"><div class="fill" style="width:${(c / tmax) * 100}%"></div></div><span class="val">${c}</span></div>`).join("")}</div>`;
+
+    // Couleurs (1 an)
+    const yr = state.rows.filter((r) => r.date && r.date > addDays(t, -365) && r.color);
+    const byColor = {};
+    for (const r of yr) { const k = COLORS[r.color] ? r.color : "Autre"; byColor[k] = (byColor[k] || 0) + 1; }
+    const cols = Object.entries(byColor).sort((a, b) => b[1] - a[1]);
+    const cmax = cols.length ? cols[0][1] : 1;
+    $("#chartColors").innerHTML = `<div class="hbars">${cols.map(([n, c]) => `
+      <div class="hbar"><span class="name">${swatch(n === "Autre" ? "Autre" : n)}${esc(n)}</span><div class="track"><div class="fill" style="width:${(c / cmax) * 100}%;background:${COLORS[n] && n !== "Noir" ? COLORS[n] : n === "Noir" ? "#5b6275" : "var(--accent)"}"></div></div><span class="val">${c}</span></div>`).join("")}</div>`;
+  }
+
+  function renderAll() {
+    $("#syncInfo").textContent = state.source === "file"
+      ? `Fichier : ${state.fileName}`
+      : state.syncedAt ? `Synchro ${new Date(state.syncedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · ${state.rows.length} cdes` : "—";
+    renderHome();
+    if (state.view === "history") filterHistory();
+    if (state.view === "stats") renderStats();
+  }
+
+  // ---------- Navigation ----------
+  const TITLES = { home: "Atelier", history: "Historique", stats: "Statistiques" };
+  function show(view) {
+    state.view = view;
+    $$(".view").forEach((v) => (v.hidden = v.id !== "view-" + view));
+    $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
+    $("#pageTitle").textContent = TITLES[view];
+    if (view === "history") filterHistory();
+    if (view === "stats") renderStats();
+    window.scrollTo({ top: 0 });
+  }
+
+  // ---------- Feuilles modales ----------
+  function openSheet(html) {
+    $("#sheetBody").innerHTML = html;
+    $("#sheet").hidden = false;
+    $("#sheetBackdrop").hidden = false;
+    $("#sheet").scrollTop = 0;
+  }
+  function closeSheet() { $("#sheet").hidden = true; $("#sheetBackdrop").hidden = true; }
+  const sheetOpen = () => !$("#sheet").hidden;
+
+  function openDetail(rowNum) {
+    const r = state.rows.find((x) => x.r === rowNum);
+    if (!r) return;
+    const u = urgency(r);
+    let statut = "Faite ✓";
+    if (u) statut = u.cls === "unknown" ? "À faire" : u.left < 0 ? `En retard de ${-u.left} j` : `À faire · ${u.left} j restant${u.left > 1 ? "s" : ""}`;
+    openSheet(`
+      <div class="detail-head">
+        ${swatch(r.color, "lg")}
+        <div><h3>${esc(r.name)}</h3><span class="status ${r.done ? "done" : "todo"}" ${u ? `style="--u:var(--${u.cls === "unknown" ? "muted" : u.cls})"` : ""}>${esc(statut)}</span></div>
+      </div>
+      <div class="detail-grid">
+        <div class="cell"><div class="k">Commandé le</div><div class="v">${fmt(r.date)}${r.ownDate ? "" : " <span class='muted'>(ligne du dessus)</span>"}</div></div>
+        <div class="cell"><div class="k">Échéance (${cfg().delai} j)</div><div class="v">${r.date ? fmt(addDays(r.date, cfg().delai)) : "—"}</div></div>
+        <div class="cell"><div class="k">Couleur</div><div class="v">${esc(r.colorRaw || "—")}</div></div>
+        <div class="cell"><div class="k">Ligne Excel</div><div class="v">${r.r}</div></div>
+        <div class="cell full"><div class="k">Client / note</div><div class="v">${esc(r.client || "—")}</div></div>
+        <div class="cell full"><div class="k">Observations</div><div class="v">${esc(r.obs || "—")}</div></div>
+      </div>
+      <div class="btns">
+        ${r.done
+          ? `<button class="btn ghost" data-act="undone">Remettre « à faire »</button>`
+          : `<button class="btn success" data-act="done">✓ Marquer comme faite</button>`}
+        <button class="btn" data-act="edit">Modifier</button>
+      </div>`);
+    $("#sheetBody").onclick = async (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (!act) return;
+      if (act === "edit") return openForm(r);
+      const btn = e.target.closest("button"); btn.disabled = true;
+      try {
+        await writeRow(r.r, [null, act === "done" ? "F" : "", null, null, null, null]);
+        closeSheet();
+        toast(act === "done" ? `${r.name} fabriquée ✓` : "Remise à faire");
+      } catch (err) { btn.disabled = false; toast("Échec : " + err.message, true); }
+    };
+  }
+
+  const COLOR_CHOICES = ["Noir", "Blanc", "Bleu", "Jaune", "Rouge", "Vert"];
+  function openForm(r) {
+    const isNew = !r;
+    const topModels = (() => {
+      const c = {}; const from = addDays(today(), -365);
+      for (const x of state.rows) if (x.date && x.date > from) c[x.name] = (c[x.name] || 0) + 1;
+      return Object.entries(c).sort((a, b) => b[1] - a[1]).map((e) => e[0]);
+    })();
+    const allModels = [...new Set(state.rows.map((x) => x.name))].sort((a, b) => a.localeCompare(b, "fr"));
+    const curColor = r ? r.color : "Noir";
+    const isOther = r && r.color && !COLOR_CHOICES.includes(r.color);
+    openSheet(`
+      <h3>${isNew ? "Nouvelle commande" : "Modifier la commande"}</h3>
+      <p class="muted" style="margin:0 0 14px">${isNew ? `Ajoutée à la ligne ${state.lastUsedRow + 1} du fichier` : `Ligne ${r.r} du fichier`}</p>
+      <form class="form" id="orderForm" autocomplete="off">
+        <div class="field"><label>Date de commande</label>
+          <input type="date" name="date" value="${isoDate(r ? r.date || today() : today())}" required></div>
+        <div class="field"><label>Modèle</label>
+          <input name="model" list="modelList" placeholder="Ex : Maxx v2" value="${esc(r ? r.model : "")}" required>
+          <datalist id="modelList">${allModels.map((m) => `<option value="${esc(m)}">`).join("")}</datalist>
+          ${isNew ? `<div class="suggest">${topModels.slice(0, 8).map((m) => `<button type="button" data-model="${esc(m)}">${esc(m)}</button>`).join("")}</div>` : ""}
+        </div>
+        <div class="field"><label>Couleur</label>
+          <div class="color-pick">
+            ${COLOR_CHOICES.map((c) => `<button type="button" data-color="${c}" class="${!isOther && curColor === c ? "active" : ""}">${swatch(c, "lg")}${c}</button>`).join("")}
+            <button type="button" data-color="__other" class="${isOther ? "active" : ""}">${swatch("Autre", "lg")}Autre</button>
+          </div>
+          <input name="colorOther" placeholder="Couleur / précision (ex : Noir 3 mm)" value="${esc(isOther ? r.colorRaw : "")}" style="margin-top:10px" ${isOther ? "" : "hidden"}>
+        </div>
+        <div class="field"><label>Client / note</label>
+          <input name="client" placeholder="Ex : Julien mail" value="${esc(r ? r.client : "")}"></div>
+        <div class="field"><label>Observations</label>
+          <textarea name="obs" placeholder="Optionnel">${esc(r ? r.obs : "")}</textarea></div>
+        <div class="switch-row"><span>Déjà fabriquée</span><button type="button" class="switch ${r && r.done ? "on" : ""}" id="doneSwitch" aria-label="Déjà fabriquée"></button></div>
+        <button class="btn primary" type="submit">${isNew ? "Ajouter la commande" : "Enregistrer"}</button>
+      </form>`);
+
+    const form = $("#orderForm");
+    let color = isOther ? "__other" : curColor;
+    $("#sheetBody").onclick = (e) => {
+      const m = e.target.closest("[data-model]");
+      if (m) { form.model.value = m.dataset.model; return; }
+      const c = e.target.closest("[data-color]");
+      if (c) {
+        color = c.dataset.color;
+        $$(".color-pick button", form).forEach((b) => b.classList.toggle("active", b === c));
+        form.colorOther.hidden = color !== "__other";
+        if (color === "__other") form.colorOther.focus();
+        return;
+      }
+      if (e.target.id === "doneSwitch") e.target.classList.toggle("on");
+    };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector("[type=submit]"); btn.disabled = true;
+      const [y, mo, d] = form.date.value.split("-").map(Number);
+      const date = new Date(y, mo - 1, d);
+      const colorVal = color === "__other" ? clean(form.colorOther.value) : color;
+      const done = $("#doneSwitch").classList.contains("on") ? "F" : "";
+      const dateChanged = isNew || !r.date || r.date.getTime() !== date.getTime();
+      const values = [dateChanged ? dateToSerial(date) : null, done, clean(form.model.value), colorVal, clean(form.client.value), clean(form.obs.value)];
+      try {
+        await writeRow(isNew ? state.lastUsedRow + 1 : r.r, values);
+        closeSheet();
+        toast(isNew ? "Commande ajoutée ✓" : "Modifiée ✓");
+      } catch (err) { btn.disabled = false; toast("Échec : " + err.message, true); }
+    };
+  }
+
+  function openSettings() {
+    const c = cfg();
+    const acc = graph.account();
+    openSheet(`
+      <h3>Réglages</h3>
+      <p class="muted" style="margin:0 0 14px">${state.source === "graph" ? `Connecté : ${esc(acc ? acc.username : "")} · ${esc(state.fileName)}` : state.source === "file" ? `Fichier local : ${esc(state.fileName)}` : "Aucune source"}</p>
+      <form class="form" id="setForm" autocomplete="off">
+        <div class="field"><label>Délai de fabrication (jours)</label><input name="delai" type="number" min="1" max="90" value="${c.delai}"></div>
+        <div class="field"><label>Lien de partage du fichier Excel</label><input name="share" placeholder="https://1drv.ms/x/…" value="${esc(c.shareLink)}"></div>
+        <div class="field"><label>ID d'application Microsoft (Azure)</label><input name="cid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${esc(c.clientId)}"></div>
+        <button class="btn primary" type="submit">Enregistrer</button>
+      </form>
+      <div class="btns two" style="margin-top:12px">
+        <label class="btn ghost file-btn">Ouvrir un fichier<input type="file" id="fileInput2" accept=".xlsx,.xlsm,.xls"></label>
+        ${acc ? `<button class="btn ghost" id="btnLogout">Se déconnecter</button>` : `<button class="btn ghost" id="btnLogin2">Connexion Microsoft</button>`}
+      </div>`);
+    const f = $("#setForm");
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      LS.set("pc_delai", Math.max(1, Number(f.delai.value) || 10));
+      LS.set("pc_shareLink", clean(f.share.value));
+      LS.set("pc_clientId", clean(f.cid.value));
+      closeSheet();
+      renderAll();
+      toast("Réglages enregistrés");
+      if (state.source === "graph") refresh(true);
+    };
+    $("#fileInput2").onchange = (e) => { if (e.target.files[0]) { closeSheet(); openLocalFile(e.target.files[0]); } };
+    const lo = $("#btnLogout"); if (lo) lo.onclick = () => { LS.del("pc_cache"); graph.logout(); };
+    const li = $("#btnLogin2"); if (li) li.onclick = startMsLogin;
+  }
+
+  async function startMsLogin() {
+    if (!cfg().clientId) {
+      $("#welcomeHint").textContent = "La connexion Microsoft n'est pas encore configurée : renseigne l'ID d'application dans Réglages.";
+      $("#welcome").hidden = true;
+      openSettings();
+      return;
+    }
+    try { await graph.init(); await graph.login(); }
+    catch (e) { toast("Connexion impossible : " + e.message, true); }
+  }
+
+  // ---------- Messages ----------
+  let toastTimer;
+  function toast(msg, err) {
+    const t = $("#toast");
+    t.textContent = msg; t.className = "toast" + (err ? " error" : ""); t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), err ? 4500 : 2200);
+  }
+  function banner(msg, err) { const b = $("#banner"); b.textContent = msg; b.className = "banner" + (err ? " error" : ""); b.hidden = false; }
+  function hideBanner() { $("#banner").hidden = true; }
+
+  // ---------- Événements ----------
+  $$(".tab").forEach((t) => (t.onclick = () => show(t.dataset.view)));
+  $("#fab").onclick = () => {
+    if (!state.source) { $("#welcome").hidden = false; return; }
+    openForm(null);
+  };
+  $("#btnRefresh").onclick = () => refresh(false);
+  $("#btnSettings").onclick = openSettings;
+  $("#sheetBackdrop").onclick = closeSheet;
+  $("#main").addEventListener("click", (e) => {
+    const el = e.target.closest("[data-row]");
+    if (el) openDetail(Number(el.dataset.row));
+  });
+  let searchTimer;
+  $("#searchInput").oninput = (e) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { state.hist.q = e.target.value; filterHistory(); }, 150); };
+  $("#statusChips").onclick = (e) => {
+    const b = e.target.closest("[data-status]"); if (!b) return;
+    $$("#statusChips .chip").forEach((c) => c.classList.toggle("active", c === b));
+    state.hist.status = b.dataset.status; filterHistory();
+  };
+  $("#topRange").onclick = (e) => {
+    const b = e.target.closest("[data-range]"); if (!b) return;
+    $$("#topRange button").forEach((c) => c.classList.toggle("active", c === b));
+    state.topRange = b.dataset.range; renderStats();
+  };
+  new IntersectionObserver((ents) => { if (ents[0].isIntersecting && state.view === "history") moreHistory(); }, { rootMargin: "600px" })
+    .observe($("#historySentinel"));
+  $("#btnLoginMs").onclick = startMsLogin;
+  $("#fileInput").onchange = (e) => { if (e.target.files[0]) openLocalFile(e.target.files[0]); };
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && state.source === "graph" && Date.now() - (state.syncedAt || 0) > 60000) refresh(true);
+  });
+
+  // Bouton retour Android (Capacitor)
+  const CapApp = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (CapApp) {
+    CapApp.addListener("backButton", () => {
+      if (sheetOpen()) closeSheet();
+      else if (state.view !== "home") show("home");
+      else CapApp.exitApp();
+    });
+  }
+
+  // ---------- Démarrage ----------
+  (async function start() {
+    const cache = LS.get("pc_cache", null);
+    try {
+      if (await graph.init()) {
+        if (graph.account()) {
+          state.source = "graph";
+          if (cache && cache.matrix) {
+            state.fileName = cache.name; state.syncedAt = cache.at;
+            buildRows(cache.matrix); renderAll();
+          }
+          await refresh(true);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      banner("Connexion Microsoft : " + e.message, true);
+    }
+    renderAll();
+    $("#welcome").hidden = false;
+  })();
+
+  // Web-app installable : cache de l'interface (inutile dans l'APK)
+  const isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+  if ("serviceWorker" in navigator && !isNative && location.protocol === "https:") {
+    navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW", e));
+  }
+
+  // Point d'entrée de test (navigateur de développement uniquement)
+  window.__pc = { openLocalFile, state };
+})();
