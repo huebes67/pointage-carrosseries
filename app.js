@@ -672,7 +672,16 @@
   // Web-app installable : cache de l'interface (inutile dans l'APK)
   const isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
   if ("serviceWorker" in navigator && !isNative && location.protocol === "https:") {
-    navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW", e));
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => {
+      // Cherche une nouvelle version à chaque retour dans l'appli
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
+    }).catch((e) => console.warn("SW", e));
+    // Nouvelle version installée : on recharge une fois pour l'afficher
+    let reloaded = false;
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController && !reloaded && !sheetOpen()) { reloaded = true; location.reload(); }
+    });
   }
 
   // Point d'entrée de test (navigateur de développement uniquement)

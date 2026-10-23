@@ -1,6 +1,6 @@
 // Garde l'interface en cache pour un démarrage instantané (les données viennent toujours du tableau).
 // Changer VERSION à chaque mise en ligne pour forcer la mise à jour sur les téléphones.
-const VERSION = "pc-v4";
+const VERSION = "pc-v5";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "config.js", "manifest.webmanifest",
   "vendor/xlsx.full.min.js",
@@ -23,7 +23,8 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // no-cache : redemande toujours la dernière version au serveur (sinon le téléphone garde l'ancienne 10 min)
+    fetch(e.request, { cache: "no-cache" })
       .then((res) => {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(e.request, copy));
