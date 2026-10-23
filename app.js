@@ -408,7 +408,14 @@
   function renderHome() {
     const t = today();
     const todo = state.rows.filter((r) => !r.done).map((r) => ({ r, u: urgency(r) }));
-    todo.sort((a, b) => (a.r.date ? a.r.date : Infinity) - (b.r.date ? b.r.date : Infinity) || a.r.r - b.r.r);
+    // Tri choisi par l'utilisateur (sans date : toujours en bas)
+    const recentFirst = LS.get("pc_todoSort", "old") === "new";
+    todo.sort((a, b) => {
+      if (!a.r.date || !b.r.date) return (a.r.date ? 0 : 1) - (b.r.date ? 0 : 1) || a.r.r - b.r.r;
+      const d = (a.r.date - b.r.date) || (a.r.r - b.r.r);
+      return recentFirst ? -d : d;
+    });
+    $$("#todoSort button").forEach((b) => b.classList.toggle("active", b.dataset.sort === (recentFirst ? "new" : "old")));
     const late = todo.filter((x) => x.u.cls === "late").length;
     const month = state.rows.filter((r) => r.date && r.date.getMonth() === t.getMonth() && r.date.getFullYear() === t.getFullYear()).length;
     const unpaid = state.rows.filter((r) => r.pay === "unpaid").length;
@@ -834,6 +841,11 @@
     const b = e.target.closest("[data-range]"); if (!b) return;
     $$("#topRange button").forEach((c) => c.classList.toggle("active", c === b));
     state.topRange = b.dataset.range; renderStats();
+  };
+  $("#todoSort").onclick = (e) => {
+    const b = e.target.closest("[data-sort]"); if (!b) return;
+    LS.set("pc_todoSort", b.dataset.sort);
+    renderHome();
   };
   $("#topCount").onclick = (e) => {
     const b = e.target.closest("[data-count]"); if (!b) return;

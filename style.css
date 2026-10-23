@@ -373,3 +373,7 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 @keyframes float { 50% { transform: translateY(-6px); } }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
 @keyframes slide { from { left: -40%; } to { left: 100%; } }
+
+/* Tri des commandes en cours */
+.todo-sort { display: flex; width: 100%; margin: -2px 0 12px; }
+.todo-sort button { flex: 1; padding: 9px 6px; font-size: 13px; }
