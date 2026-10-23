@@ -96,7 +96,7 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 }
 .job::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--u); }
 .job.ok { --u: var(--ok); } .job.warn { --u: var(--warn); } .job.hot { --u: var(--hot); }
-.job.late { --u: var(--late); background: linear-gradient(90deg, rgba(200,30,74,.16), var(--card) 55%); }
+.job.late { --u: var(--late); background: linear-gradient(90deg, rgba(200,30,74,.16), transparent 55%) var(--card); }
 .job.unknown { --u: var(--muted); }
 .job-title { font-weight: 750; font-size: 18px; display: flex; align-items: center; gap: 8px; }
 .job-meta { grid-column: 1; color: var(--muted); font-size: 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -134,8 +134,8 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
   display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
   padding: 12px 12px; background: var(--card); text-align: left; width: 100%;
 }
-.rows .row:first-child, .day-head + .row { border-top-left-radius: 14px; border-top-right-radius: 14px; }
-.row.last { border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+.rows > .swipe:first-child, .day-head + .swipe { border-top-left-radius: 14px; border-top-right-radius: 14px; }
+.swipe.last { border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
 .row:active, .job:active { filter: brightness(1.15); }
 .row-main { min-width: 0; }
 .row-title { font-weight: 650; font-size: 15.5px; }
@@ -233,6 +233,7 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 }
 .btn.primary { background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #1a0d00; }
 .btn.success { background: var(--ok); color: #04210f; }
+.btn.danger { background: var(--hot); color: #fff; }
 .btn.ghost { background: transparent; border: 1px solid var(--line); }
 .btn:active { transform: scale(.98); }
 .btn[disabled] { opacity: .5; }
@@ -309,3 +310,15 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .qnote textarea { flex: 1; min-height: 52px; padding: 11px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--card); outline: none; font-size: 15px; resize: vertical; }
 .qnote textarea:focus { border-color: var(--accent); }
 .qnote button { padding: 0 14px; border-radius: 13px; background: var(--accent); color: #1a0d00; font-weight: 750; }
+
+/* ---------- Glisser : droite = fait, gauche = supprimer ---------- */
+.swipe { position: relative; overflow: hidden; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.swipe.card { border-radius: var(--radius); }
+.sw-front { position: relative; z-index: 1; will-change: transform; }
+.sw-act {
+  position: absolute; top: 0; bottom: 0; z-index: 0; display: flex; align-items: center;
+  font-weight: 800; font-size: 15px; color: #fff; padding: 0 18px;
+}
+.sw-done { left: 0; width: 60%; background: var(--ok); color: #04210f; justify-content: flex-start; }
+.sw-del { right: 0; width: 60%; background: var(--hot); justify-content: flex-end; }
+.swipe[data-dir="right"] .sw-del, .swipe[data-dir="left"] .sw-done, .swipe:not([data-dir]) .sw-act, .swipe[data-dir=""] .sw-act { visibility: hidden; }

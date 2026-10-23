@@ -190,6 +190,87 @@
     renderAll();
   }
 
+  async function deleteRow(r) {
+    if (state.source === "sheet") await api.call({ action: "delete", row: r.r, expect: r.model });
+    // Même opération sur la copie locale : la ligne suivante garde sa date si elle en héritait
+    const m = state.matrix, i = r.r - 1, next = m[i + 1];
+    const own = (m[i] || [])[0];
+    if (own !== null && own !== "" && own !== undefined && next && (next[0] === null || next[0] === "" || next[0] === undefined) && clean(next[2])) {
+      m[i + 1] = next.slice(); m[i + 1][0] = own;
+    }
+    m.splice(i, 1);
+    buildRows(m);
+    saveCache();
+    renderAll();
+  }
+
+  function confirmDelete(r) {
+    openSheet(`
+      <h3>Supprimer cette commande ?</h3>
+      <p class="muted" style="margin:6px 0 16px">${esc(r.name)}${r.color ? " · " + esc(r.color) : ""}${r.client ? " · " + esc(r.client) : ""}<br>
+      Commandée le ${fmt(r.date)} · ligne ${r.r} du tableau</p>
+      <div class="btns two">
+        <button class="btn ghost" data-act="cancel">Annuler</button>
+        <button class="btn danger" data-act="del">Supprimer</button>
+      </div>`);
+    $("#sheetBody").onclick = async (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return closeSheet();
+      if (act !== "del") return;
+      $$("#sheetBody button").forEach((b) => (b.disabled = true));
+      try {
+        await deleteRow(r);
+        closeSheet();
+        toast("Commande supprimée");
+      } catch (err) {
+        $$("#sheetBody button").forEach((b) => (b.disabled = false));
+        toast("Échec : " + err.message, true);
+      }
+    };
+  }
+
+  // ---------- Glisser (swipe) ----------
+  let swOpen = null, sw = null;
+  function setSwipe(w, x, anim) {
+    const front = w.querySelector(".sw-front");
+    front.style.transition = anim ? "transform .22s cubic-bezier(.2,.8,.2,1)" : "none";
+    front.style.transform = x ? `translateX(${x}px)` : "";
+    w.dataset.dir = x > 0 ? "right" : x < 0 ? "left" : "";
+    w._x = x;
+  }
+  function closeSwipe() { if (swOpen) { setSwipe(swOpen, 0, true); swOpen = null; } }
+  const mainEl = $("#main");
+  mainEl.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const w = e.target.closest(".swipe");
+    if (e.target.closest(".sw-act")) return;
+    if (swOpen && swOpen !== w) closeSwipe();
+    if (!w) return;
+    sw = { w, x0: e.clientX, y0: e.clientY, base: w._x || 0, mode: null };
+  });
+  mainEl.addEventListener("pointermove", (e) => {
+    if (!sw) return;
+    const dx = e.clientX - sw.x0, dy = e.clientY - sw.y0;
+    if (!sw.mode) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.3) sw.mode = "h";
+      else if (Math.abs(dy) > 10) { sw = null; return; }
+      else return;
+    }
+    setSwipe(sw.w, Math.max(-150, Math.min(150, sw.base + dx)), false);
+  });
+  const endSwipe = () => {
+    if (!sw) return;
+    const { w, mode } = sw; sw = null;
+    if (mode !== "h") return;
+    w._swipedAt = Date.now();
+    const x = w._x || 0;
+    if (x > 60) { setSwipe(w, 120, true); swOpen = w; }
+    else if (x < -60) { setSwipe(w, -140, true); swOpen = w; }
+    else { setSwipe(w, 0, true); if (swOpen === w) swOpen = null; }
+  };
+  mainEl.addEventListener("pointerup", endSwipe);
+  mainEl.addEventListener("pointercancel", endSwipe);
+
   // ---------- Cache local (affichage instantané) ----------
   function saveCache() {
     if (state.source !== "sheet") return;
@@ -271,7 +352,7 @@
     else if (u.left === 0) { n = "0"; lbl = "dernier jour"; }
     else { n = u.left; lbl = u.left > 1 ? "jours restants" : "jour restant"; }
     const pct = u.cls === "unknown" ? 0 : Math.min(100, Math.max(4, (u.age / cfg().delai) * 100));
-    return `<button class="job ${u.cls}" data-row="${r.r}">
+    return swipeWrap(r, "card", `<button class="job sw-front ${u.cls}" data-row="${r.r}">
       <div class="job-title">${esc(r.name)}</div>
       <div class="job-meta">
         ${r.color ? `<span class="tag">${swatch(r.color)}${esc(r.color)}</span>` : ""}
@@ -281,13 +362,22 @@
       ${r.client || r.obs ? `<div class="job-note">${esc([r.client, r.obs].filter(Boolean).join(" · "))}</div>` : ""}
       <div class="countdown"><div class="n">${n}</div><div class="t">${lbl}</div></div>
       <div class="progress"><i style="width:${pct}%"></i></div>
-    </button>`;
+    </button>`);
+  }
+
+  // Droite = fait / pas fait · gauche = supprimer
+  function swipeWrap(r, cls, inner) {
+    return `<div class="swipe ${cls}" data-swipe="${r.r}">
+      <button class="sw-act sw-done" data-sw="done" tabindex="-1">${r.done ? "↺ Pas fait" : "✓ Fait"}</button>
+      <button class="sw-act sw-del" data-sw="del" tabindex="-1">🗑 Supprimer</button>
+      ${inner}
+    </div>`;
   }
 
   function rowHtml(r, last) {
     const u = urgency(r);
     const sub = [r.color, r.client, r.obs].filter(Boolean).join(" · ");
-    return `<button class="row ${last ? "last" : ""}" data-row="${r.r}" ${u ? `style="--u:var(--${u.cls === "unknown" ? "muted" : u.cls})"` : ""}>
+    return swipeWrap(r, last ? "last" : "", `<button class="row sw-front" data-row="${r.r}" ${u ? `style="--u:var(--${u.cls === "unknown" ? "muted" : u.cls})"` : ""}>
       ${swatch(r.color)}
       <div class="row-main">
         <div class="row-title">${esc(r.name)}</div>
@@ -297,7 +387,7 @@
         <span class="status ${r.done ? "done" : "todo"}">${r.done ? "Faite" : "À faire"}</span>
         ${payPill(r)}
       </div>
-    </button>`;
+    </button>`);
   }
 
   // ---------- Rendu : Historique ----------
@@ -622,6 +712,21 @@
       $$("#statusChips .chip").forEach((c) => c.classList.toggle("active", c.dataset.status === go.dataset.goto));
       return show("history");
     }
+    const act = e.target.closest(".sw-act");
+    if (act) {
+      const w = act.closest(".swipe");
+      const r = state.rows.find((x) => x.r === Number(w.dataset.swipe));
+      closeSwipe();
+      if (!r) return;
+      if (act.dataset.sw === "del") return confirmDelete(r);
+      writeRow(r.r, [null, r.done ? "" : "F", null, null, null, null, null], r.model)
+        .then(() => toast(r.done ? "Remise en cours" : `${r.name} fabriquée ✓`))
+        .catch((err) => toast("Échec : " + err.message, true));
+      return;
+    }
+    const w = e.target.closest(".swipe");
+    if (w && (Date.now() - (w._swipedAt || 0) < 400)) return; // fin d'un glisser, pas un appui
+    if (w && w === swOpen) return closeSwipe();
     const el = e.target.closest("[data-row]");
     if (el) openDetail(Number(el.dataset.row));
   });
