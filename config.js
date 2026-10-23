@@ -1,10 +1,7 @@
-// Réglages de connexion au fichier Excel partagé (OneDrive).
-// Ces valeurs peuvent aussi être saisies dans l'appli (Réglages).
+// Réglages publics de l'appli (ce fichier est en ligne : n'y mets jamais le code d'accès).
 window.APP_CONFIG = {
-  // "ID d'application (client)" donné par le portail Azure après l'inscription de l'appli.
-  CLIENT_ID: "",
-  // Lien de partage du fichier (Excel > Partager > Copier le lien).
-  SHARE_LINK: "",
+  // Adresse du script Google du tableau (Déployer > Application Web > URL, se termine par /exec).
+  SCRIPT_URL: "",
   // Délai de fabrication en jours.
   DELAI_JOURS: 10,
 };

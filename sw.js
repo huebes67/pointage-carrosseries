@@ -1,9 +1,9 @@
 // Garde l'interface en cache pour un démarrage instantané (les données viennent toujours d'Excel).
 // Changer VERSION à chaque mise en ligne pour forcer la mise à jour sur les téléphones.
-const VERSION = "pc-v1";
+const VERSION = "pc-v2";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "config.js", "manifest.webmanifest",
-  "vendor/xlsx.full.min.js", "vendor/msal-browser.min.js",
+  "vendor/xlsx.full.min.js",
   "icons/icon-192.png", "icons/apple-touch-icon.png",
 ];
 

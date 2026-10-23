@@ -11,14 +11,10 @@
   };
   const base = window.APP_CONFIG || {};
   const cfg = () => ({
-    clientId: LS.get("pc_clientId", base.CLIENT_ID || ""),
-    shareLink: LS.get("pc_shareLink", base.SHARE_LINK || ""),
+    scriptUrl: LS.get("pc_scriptUrl", "") || base.SCRIPT_URL || "",
+    key: LS.get("pc_key", ""), // code d'accès : jamais dans le code publié, saisi sur chaque téléphone
     delai: Number(LS.get("pc_delai", base.DELAI_JOURS || 10)) || 10,
   });
-  const SCOPES = ["Files.ReadWrite.All"];
-  const MAX_ROWS = 6000;
-  // Adresse de retour après connexion : doit être déclarée telle quelle dans Azure.
-  const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 
   // ---------- Outils ----------
   const $ = (s, el = document) => el.querySelector(s);
@@ -77,7 +73,7 @@
     rows: [],          // commandes (lignes avec un modèle)
     lastUsedRow: 1,    // dernière ligne Excel utilisée (pour ajouter à la suite)
     matrix: null,      // valeurs brutes A:F
-    source: null,      // "graph" | "file"
+    source: null,      // "sheet" | "file"
     fileName: "",
     syncedAt: null,
     view: "home",
@@ -134,88 +130,40 @@
     return { cls, age, left, due: addDays(r.date, d) };
   }
 
-  // ---------- Source : Microsoft (OneDrive / Excel en ligne) ----------
-  const graph = {
-    msal: null,
-    async init() {
-      const { clientId } = cfg();
-      if (!clientId || !window.msal) return false;
-      if (this.msal && this.msal._cid === clientId) return true;
-      this.msal = new msal.PublicClientApplication({
-        auth: { clientId, authority: "https://login.microsoftonline.com/common", redirectUri: APP_URL },
-        cache: { cacheLocation: "localStorage" },
-      });
-      this.msal._cid = clientId;
-      if (this.msal.initialize) await this.msal.initialize();
-      const res = await this.msal.handleRedirectPromise();
-      if (res && res.account) this.msal.setActiveAccount(res.account);
-      const acc = this.msal.getActiveAccount() || this.msal.getAllAccounts()[0];
-      if (acc) this.msal.setActiveAccount(acc);
-      return true;
-    },
-    account() { return this.msal && this.msal.getActiveAccount(); },
-    async login() { await this.msal.loginRedirect({ scopes: SCOPES, prompt: "select_account" }); },
-    async logout() {
-      const acc = this.account();
-      LS.del("pc_target");
-      if (acc) await this.msal.logoutRedirect({ account: acc, postLogoutRedirectUri: APP_URL });
-    },
-    async token() {
-      const account = this.account();
-      if (!account) throw new Error("Non connecté");
+  // ---------- Source : Google Sheets (via le script Google du tableau) ----------
+  const api = {
+    ready() { const c = cfg(); return !!(c.scriptUrl && c.key); },
+    async call(body) {
+      const c = cfg();
+      let res;
       try {
-        return (await this.msal.acquireTokenSilent({ scopes: SCOPES, account })).accessToken;
-      } catch (e) {
-        if (e instanceof msal.InteractionRequiredAuthError) { await this.msal.acquireTokenRedirect({ scopes: SCOPES, account }); }
-        throw e;
+        // text/plain : évite la requête de vérification que Google refuse
+        res = await fetch(c.scriptUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...body, key: c.key }) });
+      } catch {
+        throw new Error("Pas de connexion internet ?");
       }
+      if (!res.ok) throw new Error("Serveur Google indisponible (" + res.status + ")");
+      let j;
+      try { j = await res.json(); } catch { throw new Error("Réponse inattendue : vérifie l'adresse du script"); }
+      if (!j.ok) { const err = new Error(j.error || "Erreur"); err.auth = /code/i.test(j.error || ""); throw err; }
+      return j;
     },
-    async api(path, opts = {}) {
-      const res = await fetch("https://graph.microsoft.com/v1.0" + path, {
-        ...opts,
-        headers: { Authorization: "Bearer " + (await this.token()), "Content-Type": "application/json", ...(opts.headers || {}) },
-      });
-      if (!res.ok) {
-        let msg = res.status + "";
-        try { const j = await res.json(); msg = (j.error && (j.error.message || j.error.code)) || msg; } catch { /* corps vide */ }
-        const err = new Error(msg); err.status = res.status; throw err;
-      }
-      return res.status === 204 ? null : res.json();
-    },
-    async target() {
-      const { shareLink } = cfg();
-      const cached = LS.get("pc_target", null);
-      if (cached && cached.link === shareLink) return cached;
-      if (!shareLink) throw new Error("Lien de partage du fichier manquant (Réglages).");
-      const enc = "u!" + btoa(unescape(encodeURIComponent(shareLink))).replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
-      const item = await this.api(`/shares/${enc}/driveItem?$select=id,name,parentReference`);
-      const base = `/drives/${item.parentReference.driveId}/items/${item.id}/workbook`;
-      const ws = await this.api(`${base}/worksheets?$select=name`);
-      const sheet = (ws.value.find((w) => fold(w.name) === "commande") || ws.value[0]).name;
-      const t = { link: shareLink, base, sheet, name: item.name };
-      LS.set("pc_target", t);
-      return t;
-    },
-    sheetPath(t) { return `${t.base}/worksheets('${encodeURIComponent(t.sheet.replace(/'/g, "''"))}')`; },
-    async load() {
-      const t = await this.target();
-      const res = await this.api(`${this.sheetPath(t)}/range(address='A1:F${MAX_ROWS}')?$select=values`);
-      state.fileName = t.name;
-      return res.values;
-    },
-    async patch(address, body) {
-      const t = await this.target();
-      await this.api(`${this.sheetPath(t)}/range(address='${address}')`, { method: "PATCH", body: JSON.stringify(body) });
-    },
+    async load() { return (await this.call({ action: "read" })).values; },
   };
 
-  // ---------- Écriture (Microsoft ou fichier local en mémoire) ----------
-  // values = [A..F] ; null = ne pas toucher la cellule
-  async function writeRow(rowNum, values) {
-    if (state.source === "graph") {
-      if (values[0] !== null) await graph.patch(`A${rowNum}`, { values: [[values[0]]], numberFormat: [["dd/mm/yyyy"]] });
-      const rest = values.slice(1);
-      if (rest.some((v) => v !== null)) await graph.patch(`B${rowNum}:F${rowNum}`, { values: [rest] });
+  // ---------- Écriture (Google Sheets ou fichier local en mémoire) ----------
+  // values = [A..F] (date en numéro de série Excel) ; null = ne pas toucher la cellule
+  // rowNum = null pour une nouvelle commande ; expect = modèle attendu sur la ligne (garde-fou)
+  async function writeRow(rowNum, values, expect) {
+    if (state.source === "sheet") {
+      const send = values.slice();
+      if (send[0] !== null) { const d = serialToDate(send[0]); send[0] = [d.getFullYear(), d.getMonth() + 1, d.getDate()]; }
+      const res = rowNum
+        ? await api.call({ action: "update", row: rowNum, expect, values: send })
+        : await api.call({ action: "add", values: send });
+      rowNum = res.row;
+    } else if (!rowNum) {
+      rowNum = state.lastUsedRow + 1;
     }
     const m = state.matrix;
     while (m.length < rowNum) m.push([]);
@@ -228,26 +176,29 @@
 
   // ---------- Cache local (affichage instantané) ----------
   function saveCache() {
-    if (state.source !== "graph") return;
-    LS.set("pc_cache", { matrix: state.matrix, at: state.syncedAt, name: state.fileName });
+    if (state.source !== "sheet") return;
+    LS.set("pc_cache", { matrix: state.matrix, at: state.syncedAt });
   }
 
   // ---------- Chargement ----------
   async function refresh(silent) {
-    if (state.source !== "graph") { if (!silent) toast("Mode fichier : rouvre le fichier pour actualiser"); return; }
+    if (state.source !== "sheet") { if (!silent) toast("Mode fichier : rouvre le fichier pour actualiser"); return false; }
     const btn = $("#btnRefresh");
     btn.classList.add("spin");
     try {
-      const m = await graph.load();
+      const m = await api.load();
       state.syncedAt = Date.now();
       buildRows(m);
       saveCache();
       hideBanner();
       renderAll();
       if (!silent) toast("À jour ✓");
+      return true;
     } catch (e) {
       console.error(e);
-      banner("Impossible de lire le fichier : " + e.message, true);
+      banner("Impossible de lire le tableau : " + e.message, true);
+      if (e.auth) { LS.del("pc_key"); LS.del("pc_cache"); askCode(e.message); }
+      return false;
     } finally {
       btn.classList.remove("spin");
     }
@@ -464,7 +415,7 @@
       if (act === "edit") return openForm(r);
       const btn = e.target.closest("button"); btn.disabled = true;
       try {
-        await writeRow(r.r, [null, act === "done" ? "F" : "", null, null, null, null]);
+        await writeRow(r.r, [null, act === "done" ? "F" : "", null, null, null, null], r.model);
         closeSheet();
         toast(act === "done" ? `${r.name} fabriquée ✓` : "Remise à faire");
       } catch (err) { btn.disabled = false; toast("Échec : " + err.message, true); }
@@ -533,7 +484,7 @@
       const dateChanged = isNew || !r.date || r.date.getTime() !== date.getTime();
       const values = [dateChanged ? dateToSerial(date) : null, done, clean(form.model.value), colorVal, clean(form.client.value), clean(form.obs.value)];
       try {
-        await writeRow(isNew ? state.lastUsedRow + 1 : r.r, values);
+        await writeRow(isNew ? null : r.r, values, isNew ? null : r.model);
         closeSheet();
         toast(isNew ? "Commande ajoutée ✓" : "Modifiée ✓");
       } catch (err) { btn.disabled = false; toast("Échec : " + err.message, true); }
@@ -542,45 +493,59 @@
 
   function openSettings() {
     const c = cfg();
-    const acc = graph.account();
     openSheet(`
       <h3>Réglages</h3>
-      <p class="muted" style="margin:0 0 14px">${state.source === "graph" ? `Connecté : ${esc(acc ? acc.username : "")} · ${esc(state.fileName)}` : state.source === "file" ? `Fichier local : ${esc(state.fileName)}` : "Aucune source"}</p>
+      <p class="muted" style="margin:0 0 14px">${state.source === "sheet" ? "Connecté au tableau Google Sheets" : state.source === "file" ? `Fichier local : ${esc(state.fileName)}` : "Aucune source"}</p>
       <form class="form" id="setForm" autocomplete="off">
         <div class="field"><label>Délai de fabrication (jours)</label><input name="delai" type="number" min="1" max="90" value="${c.delai}"></div>
-        <div class="field"><label>Lien de partage du fichier Excel</label><input name="share" placeholder="https://1drv.ms/x/…" value="${esc(c.shareLink)}"></div>
-        <div class="field"><label>ID d'application Microsoft (Azure)</label><input name="cid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${esc(c.clientId)}"></div>
+        <div class="field"><label>Adresse du script Google</label><input name="url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(c.scriptUrl)}"></div>
         <button class="btn primary" type="submit">Enregistrer</button>
       </form>
       <div class="btns two" style="margin-top:12px">
         <label class="btn ghost file-btn">Ouvrir un fichier<input type="file" id="fileInput2" accept=".xlsx,.xlsm,.xls"></label>
-        ${acc ? `<button class="btn ghost" id="btnLogout">Se déconnecter</button>` : `<button class="btn ghost" id="btnLogin2">Connexion Microsoft</button>`}
+        ${c.key ? `<button class="btn ghost" id="btnForget">Oublier le code</button>` : `<button class="btn ghost" id="btnCode2">Code d'accès</button>`}
       </div>`);
     const f = $("#setForm");
     f.onsubmit = async (e) => {
       e.preventDefault();
       LS.set("pc_delai", Math.max(1, Number(f.delai.value) || 10));
-      LS.set("pc_shareLink", clean(f.share.value));
-      LS.set("pc_clientId", clean(f.cid.value));
+      LS.set("pc_scriptUrl", clean(f.url.value));
       closeSheet();
       renderAll();
       toast("Réglages enregistrés");
-      if (state.source === "graph") refresh(true);
+      if (state.source === "sheet") refresh(true);
     };
     $("#fileInput2").onchange = (e) => { if (e.target.files[0]) { closeSheet(); openLocalFile(e.target.files[0]); } };
-    const lo = $("#btnLogout"); if (lo) lo.onclick = () => { LS.del("pc_cache"); graph.logout(); };
-    const li = $("#btnLogin2"); if (li) li.onclick = startMsLogin;
+    const fg = $("#btnForget");
+    if (fg) fg.onclick = () => { LS.del("pc_key"); LS.del("pc_cache"); location.reload(); };
+    const cd = $("#btnCode2"); if (cd) cd.onclick = () => askCode();
   }
 
-  async function startMsLogin() {
-    if (!cfg().clientId) {
-      $("#welcomeHint").textContent = "La connexion Microsoft n'est pas encore configurée : renseigne l'ID d'application dans Réglages.";
-      $("#welcome").hidden = true;
-      openSettings();
-      return;
-    }
-    try { await graph.init(); await graph.login(); }
-    catch (e) { toast("Connexion impossible : " + e.message, true); }
+  // Saisie du code d'accès (une fois par téléphone)
+  function askCode(err) {
+    const c = cfg();
+    $("#welcome").hidden = true;
+    openSheet(`
+      <h3>Code d'accès</h3>
+      <p class="muted" style="margin:0 0 14px">Saisis le code une seule fois : il reste enregistré sur ce téléphone.</p>
+      ${err ? `<div class="banner error" style="margin:0 0 14px">${esc(err)}</div>` : ""}
+      <form class="form" id="codeForm" autocomplete="off">
+        ${base.SCRIPT_URL ? "" : `
+        <div class="field"><label>Adresse du script Google</label><input name="url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(c.scriptUrl)}" required></div>`}
+        <div class="field"><label>Code d'accès</label><input name="key" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" required></div>
+        <button class="btn primary" type="submit">Se connecter</button>
+      </form>`);
+    const f = $("#codeForm");
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = f.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Connexion…";
+      if (f.url) LS.set("pc_scriptUrl", clean(f.url.value));
+      LS.set("pc_key", f.key.value.trim());
+      state.source = "sheet";
+      closeSheet();
+      if (await refresh(true)) toast(`Connecté ✓ ${state.rows.length} commandes`);
+    };
+    setTimeout(() => f.key.focus(), 250);
   }
 
   // ---------- Messages ----------
@@ -620,10 +585,10 @@
   };
   new IntersectionObserver((ents) => { if (ents[0].isIntersecting && state.view === "history") moreHistory(); }, { rootMargin: "600px" })
     .observe($("#historySentinel"));
-  $("#btnLoginMs").onclick = startMsLogin;
+  $("#btnCode").onclick = () => askCode();
   $("#fileInput").onchange = (e) => { if (e.target.files[0]) openLocalFile(e.target.files[0]); };
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && state.source === "graph" && Date.now() - (state.syncedAt || 0) > 60000) refresh(true);
+    if (!document.hidden && state.source === "sheet" && Date.now() - (state.syncedAt || 0) > 60000) refresh(true);
   });
 
   // Bouton retour Android (Capacitor)
@@ -637,23 +602,14 @@
   }
 
   // ---------- Démarrage ----------
-  (async function start() {
-    const cache = LS.get("pc_cache", null);
-    try {
-      if (await graph.init()) {
-        if (graph.account()) {
-          state.source = "graph";
-          if (cache && cache.matrix) {
-            state.fileName = cache.name; state.syncedAt = cache.at;
-            buildRows(cache.matrix); renderAll();
-          }
-          await refresh(true);
-          return;
-        }
-      }
-    } catch (e) {
-      console.error(e);
-      banner("Connexion Microsoft : " + e.message, true);
+  (function start() {
+    if (api.ready()) {
+      state.source = "sheet";
+      const cache = LS.get("pc_cache", null);
+      if (cache && cache.matrix) { state.syncedAt = cache.at; buildRows(cache.matrix); }
+      renderAll();
+      refresh(true);
+      return;
     }
     renderAll();
     $("#welcome").hidden = false;
