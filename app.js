@@ -199,8 +199,14 @@
     state.matrix = matrix;
   }
 
-  // ---------- Moules : A Modèle · B État · C Note · D Lieu ----------
-  const MOULE_HEAD = ["Modèle", "État", "Note", "Lieu"];
+  // ---------- Moules : A Modèle · B État · C Note · D Lieu · E Échelle ----------
+  const MOULE_HEAD = ["Modèle", "État", "Note", "Lieu", "Échelle"];
+  const ECHELLES = ["1/5", "1/7", "1/8", "1/10", "1/16"];
+  // Échelle écrite dans le nom du modèle ("Cox baja 1/10", "Truggy 1/8"…)
+  function scaleFromName(name) {
+    const m = String(name || "").match(/\b1\s*\/\s*(5|7|8|10|16)\b/);
+    return m ? "1/" + m[1] : "";
+  }
   const LIEUX = ["Chez Jean", "À l'atelier"];
   const MOULE_LABEL = { ok: "OK", casse: "Cassé", sechage: "Séchage" };
   function mouleState(raw) {
@@ -216,7 +222,7 @@
       const a = m[i] || [];
       const model = clean(a[0]);
       if (!model) continue;
-      list.push({ r: i + 1, model, key: modelKey(model), etat: mouleState(a[1]), note: clean(a[2]), lieu: clean(a[3]) });
+      list.push({ r: i + 1, model, key: modelKey(model), etat: mouleState(a[1]), note: clean(a[2]), lieu: clean(a[3]), scale: clean(a[4]) });
     }
     // Pour chaque modèle : le moule le plus bloquant (cassé avant séchage)
     const alert = {};
@@ -692,17 +698,19 @@
     }
     const byKey = {};
     for (const x of state.moules) byKey[x.key] = { ...x, model: names[x.key] || x.model, lieu: x.lieu || LIEU_JEAN };
-    for (const k of auto) if (!byKey[k]) byKey[k] = { r: null, model: names[k], key: k, etat: "ok", note: "", lieu: LIEU_JEAN, virtual: true };
-    return Object.values(byKey);
+    for (const k of auto) if (!byKey[k]) byKey[k] = { r: null, model: names[k], key: k, etat: "ok", note: "", lieu: LIEU_JEAN, scale: "", virtual: true };
+    const list = Object.values(byKey);
+    for (const x of list) x.echelle = ECHELLES.includes(x.scale) ? x.scale : scaleFromName(x.model);
+    return list;
   }
   const findMoule = (key) => allMoules().find((x) => x.key === key);
 
   // Enregistre un changement (état, note ou lieu) ; crée la ligne si le moule n'est pas encore dans la feuille
   function saveMoule(x, patch) {
     if (x.virtual) {
-      return writeMoule(null, [realName(x.model), MOULE_LABEL[patch.etat || x.etat], patch.note ?? x.note, patch.lieu ?? x.lieu]);
+      return writeMoule(null, [realName(x.model), MOULE_LABEL[patch.etat || x.etat], patch.note ?? x.note, patch.lieu ?? x.lieu, patch.scale ?? x.scale ?? ""]);
     }
-    return writeMoule(x.r, [null, patch.etat ? MOULE_LABEL[patch.etat] : null, patch.note ?? null, patch.lieu ?? null], x.model);
+    return writeMoule(x.r, [null, patch.etat ? MOULE_LABEL[patch.etat] : null, patch.note ?? null, patch.lieu ?? null, patch.scale ?? null], x.model);
   }
 
   function mouleCard(x, waiting) {
@@ -710,7 +718,7 @@
     const toAtelier = x.lieu !== LIEU_ATELIER;
     return `<div class="mcard ${x.etat}" data-moule="${esc(x.key)}" role="button" tabindex="0">
       <span class="mstate">${icon(x.etat === "casse" ? "alert" : x.etat === "sechage" ? "clock" : "check")}</span>
-      <span class="mmain"><span class="mname">${esc(x.model)}</span>${x.note ? `<span class="msub">${esc(x.note)}</span>` : ""}
+      <span class="mmain"><span class="mname">${esc(x.model)}${x.echelle && x.echelle !== scaleFromName(x.model) ? ` <span class="mscale">${x.echelle}</span>` : ""}</span>${x.note ? `<span class="msub">${esc(x.note)}</span>` : ""}
         ${x.etat !== "ok" || w ? `<span class="mline">${x.etat !== "ok" ? `<span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>` : ""}${w ? `<span class="mwait">${w} cde${w > 1 ? "s" : ""} en attente</span>` : ""}</span>` : ""}</span>
       <button class="mmove" data-move="${esc(x.key)}" aria-label="${toAtelier ? "Passer à l'atelier" : "Remettre chez Jean"}">
         ${icon("swap")}<span>${toAtelier ? "Atelier" : "Jean"}</span>
@@ -729,7 +737,15 @@
       <div class="mstat ok"><b>${n("ok")}</b>OK</div>`;
     // Recherche : chaque mot tapé doit être le début d'un mot du modèle
     const terms = fold(state.mq || "").split(/\s+/).filter(Boolean);
+    const sc = state.mscale || "all";
+    $$("#mouleScale .chip").forEach((c) => {
+      const v = c.dataset.scale;
+      c.classList.toggle("active", v === sc);
+      const n = v === "all" ? all.length : all.filter((x) => (v === "none" ? !x.echelle : x.echelle === v)).length;
+      c.querySelector("b").textContent = n;
+    });
     const list = all.filter((x) => {
+      if (sc !== "all" && (sc === "none" ? x.echelle : x.echelle !== sc)) return false;
       if (!terms.length) return true;
       const words = fold(x.model).split(/[\s/.-]+/);
       return terms.every((t) => words.some((w) => w.startsWith(t)) || fold(x.model).replace(/\s/g, "").startsWith(t));
@@ -950,6 +966,10 @@
       <div class="mchoice lieu">
         ${LIEUX.map((l) => `<button data-lieu="${esc(l)}" class="${x.lieu === l ? "active lieu" : ""}">${esc(l)}</button>`).join("")}
       </div>
+      <div class="qlabel">Échelle${!x.scale && x.echelle ? ` <span class="muted">· trouvée dans le nom</span>` : ""}</div>
+      <div class="mchoice scale">
+        ${ECHELLES.map((e) => `<button data-scale="${e}" class="${x.echelle === e ? "active lieu" : ""}">${e}</button>`).join("")}
+      </div>
       <div class="qlabel">Note</div>
       <div class="qnote">
         <textarea id="mNote" placeholder="Ex : fissure côté capot, 2e moule en cours…">${esc(x.note)}</textarea>
@@ -962,6 +982,13 @@
       catch (err) { toast("Échec : " + err.message, true); }
     };
     $("#sheetBody").onclick = async (e) => {
+      const scb = e.target.closest("[data-scale]");
+      if (scb) {
+        // même échelle touchée une 2e fois = on l'enlève
+        const scale = scb.dataset.scale === x.scale ? "" : scb.dataset.scale;
+        if (!scale && !x.scale) return;
+        return save({ scale }, scale ? `Échelle ${scale}` : "Échelle enlevée");
+      }
       const li = e.target.closest("[data-lieu]");
       if (li) {
         if (li.dataset.lieu === x.lieu) return;
@@ -989,7 +1016,7 @@
   // Ajout d'un moule
   function openMouleForm() {
     const models = knownModels();
-    let etat = "ok", lieu = LIEU_JEAN;
+    let etat = "ok", lieu = LIEU_JEAN, scale = "";
     openSheet(`
       <h3>Nouveau moule</h3>
       <form class="form" id="mouleForm" autocomplete="off">
@@ -1004,6 +1031,9 @@
             <button type="button" data-etat="sechage">${icon("clock")}Séchage</button>
           </div>
         </div>
+        <div class="field"><label>Échelle</label>
+          <div class="mchoice scale">${ECHELLES.map((e) => `<button type="button" data-scale="${e}">${e}</button>`).join("")}</div>
+        </div>
         <div class="field"><label>Où est le moule ?</label>
           <div class="mchoice lieu">${LIEUX.map((l) => `<button type="button" data-lieu="${esc(l)}" class="${l === LIEU_JEAN ? "active lieu" : ""}">${esc(l)}</button>`).join("")}</div>
         </div>
@@ -1015,6 +1045,12 @@
     $("#sheetBody").onclick = (e) => {
       const m = e.target.closest("[data-model]");
       if (m) { f.model.value = m.dataset.model; $("#mSuggest").innerHTML = ""; return; }
+      const scb = e.target.closest("[data-scale]");
+      if (scb) {
+        scale = scb.dataset.scale === scale ? "" : scb.dataset.scale;
+        $$(".mchoice.scale button", f).forEach((x) => (x.className = x === scb && scale ? "active lieu" : ""));
+        return;
+      }
       const li = e.target.closest("[data-lieu]");
       if (li) {
         lieu = li.dataset.lieu;
@@ -1024,7 +1060,7 @@
       const b = e.target.closest("[data-etat]");
       if (b) {
         etat = b.dataset.etat;
-        $$(".mchoice:not(.lieu) button", f).forEach((x) => (x.className = x === b ? "active " + etat : ""));
+        $$(".mchoice:not(.lieu):not(.scale) button", f).forEach((x) => (x.className = x === b ? "active " + etat : ""));
       }
     };
     f.onsubmit = async (e) => {
@@ -1032,7 +1068,7 @@
       const model = clean(f.model.value);
       const same = findMoule(modelKey(model));
       if (same) { toast("Ce moule est déjà dans la liste"); return openMoule(same.key); }
-      await writeMoule(null, [realName(model), MOULE_LABEL[etat], clean(f.note.value), lieu]);
+      await writeMoule(null, [realName(model), MOULE_LABEL[etat], clean(f.note.value), lieu, scale || scaleFromName(model)]);
       closeSheet();
       toast("Moule ajouté");
     };
@@ -1289,6 +1325,11 @@
   };
   let mSearchTimer;
   $("#mouleSearch").oninput = (e) => { clearTimeout(mSearchTimer); mSearchTimer = setTimeout(() => { state.mq = e.target.value; renderMoules(); }, 120); };
+  $("#mouleScale").onclick = (e) => {
+    const b = e.target.closest("[data-scale]"); if (!b) return;
+    state.mscale = b.dataset.scale;
+    renderMoules();
+  };
   $("#mouleOrder").onclick = () => {
     const next = LS.get("pc_mouleOrder", "atelier") === "jean" ? "atelier" : "jean";
     LS.set("pc_mouleOrder", next);
