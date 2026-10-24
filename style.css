@@ -346,3 +346,50 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .sort-btn.recent .ar-up { stroke: var(--muted); }
 .sort-btn .ar-down { stroke: var(--muted); }
 .sort-btn:active { transform: scale(.92); }
+
+/* ---------- Version PC (fenêtre large) : menu à gauche, grilles, fenêtres centrées ---------- */
+@media (min-width: 900px) {
+  :root { --side: 230px; }
+  .topbar { padding: 14px 24px; }
+  .tabbar {
+    top: 75px; bottom: 0; left: 0; right: auto; width: var(--side);
+    display: flex; flex-direction: column; gap: 6px; padding: 18px 12px;
+    background: var(--bg-2); border-top: 0; border-right: 1px solid rgba(255,255,255,.05);
+  }
+  .tab { flex-direction: row; justify-content: flex-start; gap: 14px; padding: 13px 16px; font-size: 15px; }
+  .tab:hover { background: rgba(255,255,255,.04); color: var(--text); }
+  .tab.active { background: rgba(255,122,26,.12); }
+  main { margin-left: var(--side); max-width: 1500px; padding: 22px 32px 60px; }
+  .banner { margin: 12px 32px 0 calc(var(--side) + 32px); }
+
+  /* Atelier : commandes en grille */
+  #todoList { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+  #todoList .swipe.card > .job { height: 100%; align-content: start; }
+  .job:hover, .row:hover { filter: brightness(1.12); }
+  #recentList { max-width: 900px; }
+
+  /* Historique : une ligne par commande, infos alignées */
+  .search { max-width: 640px; }
+  #historyList { max-width: 1100px; }
+  .row { padding: 12px 18px; }
+  .row-main { display: flex; align-items: baseline; gap: 20px; }
+  .row-title { min-width: 240px; }
+  .row-sub { -webkit-line-clamp: 1; }
+  .row-side { flex-direction: row; align-items: center; }
+
+  /* Stats : graphiques côte à côte */
+  #view-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  #view-stats .panel { margin-top: 0; }
+  #view-stats .panel:first-child { grid-column: 1 / -1; }
+  .bars { height: 220px; }
+
+  /* Fiches et formulaires : fenêtre centrée au lieu d'un panneau en bas */
+  .sheet {
+    left: 50%; right: auto; top: 50%; bottom: auto; width: min(580px, 92vw); max-height: 88vh;
+    transform: translate(-50%, -50%); border-radius: 22px; padding: 22px 26px; animation: fade .18s;
+    border: 1px solid var(--line);
+  }
+  .sheet-grip { display: none; }
+  .fab { right: 32px; bottom: 32px; }
+  .toast { bottom: 40px; left: calc(50% + var(--side) / 2); }
+}
