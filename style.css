@@ -139,7 +139,7 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
   position: relative; overflow: hidden;
   display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
   background: var(--card); border-radius: var(--radius); padding: 16px;
-  border: 1px solid var(--outline); text-align: left; width: 100%;
+  border: 1px solid var(--accent); text-align: left; width: 100%;
 }
 .job.ok { --u: var(--ok); } .job.warn { --u: var(--warn); } .job.hot { --u: var(--hot); }
 .job.late { --u: var(--late); }
@@ -374,7 +374,7 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .cband {
   grid-column: 1 / -1; margin: -16px -16px 8px; padding: 6px 16px;
   background: var(--c); color: var(--t); font-size: 13px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase;
-  border-bottom: 1px solid var(--outline);
+  border-bottom: 1px solid var(--accent);
 }
 .cband.noir { background: #050506; }
 .row > .swatch { width: 22px; height: 22px; }
