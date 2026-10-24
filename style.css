@@ -412,6 +412,8 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
   /* Atelier : commandes en grille */
   #todoList { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
   #todoList .swipe.card > .job { height: 100%; align-content: start; }
+  #todoList .jwrap { display: flex; flex-direction: column; }
+  #todoList .jwrap .swipe.card { flex: 1; }
   .job:hover, .row:hover { filter: brightness(1.12); }
   #recentList { max-width: 900px; }
 
@@ -572,3 +574,38 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 /* Moules glissables */
 .mswipe { border-radius: 16px; }
 .mswipe .sw-del { width: 70%; }
+
+/* ---------- Commande groupée : modèles supplémentaires ---------- */
+#extraLines { display: grid; gap: 10px; }
+#extraLines:empty { display: none; }
+.xline { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 12px; display: grid; gap: 8px; }
+.xhead { display: flex; justify-content: space-between; align-items: center; }
+.xnum { font-size: 12.5px; font-weight: 700; color: var(--muted); }
+.xdel { color: var(--hot); padding: 4px 6px; border-radius: 8px; }
+.xdel .ic { width: 18px; height: 18px; }
+.xline .xmodel { width: 100%; padding: 12px 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg-2); color: var(--text); font-size: 16px; outline: none; }
+.xline .xmodel:focus { border-color: var(--accent); }
+.xline .suggest { margin-top: 0; }
+.xline .suggest:empty, .xmoule:empty { display: none; }
+.xcolors { display: flex; gap: 8px; flex-wrap: wrap; }
+.xcolors button { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; border-radius: 50%; border: 2px solid transparent; }
+.xcolors button .swatch { width: 28px; height: 28px; display: block; }
+.xcolors button.active { border-color: var(--accent); }
+#addLine { width: 100%; }
+#addLine .ic { width: 18px; height: 18px; }
+
+/* Message vert en haut */
+.toast.ok {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--ok); color: #04210f; font-weight: 750; box-shadow: 0 10px 30px rgba(47,191,113,.35);
+}
+.toast.ok .ic { width: 18px; height: 18px; stroke-width: 2.8; }
+.toast { width: max-content; max-width: calc(100vw - 32px); }
+.toast.ok span { white-space: normal; }
+
+/* Étiquette verte au-dessus des tuiles d'une commande groupée */
+.grp-label {
+  display: flex; align-items: center; gap: 6px; margin: 0 0 6px 4px;
+  font-size: 12.5px; font-weight: 750; color: var(--ok);
+}
+.grp-label .ic { width: 15px; height: 15px; stroke-width: 2.6; }

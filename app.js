@@ -137,6 +137,7 @@
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     mold: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5L12 12l8-4.5M12 12v9"/>',
     swap: '<path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
   };
   const icon = (name, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -577,14 +578,24 @@
     $("#recentList").innerHTML = recent.map((r, i) => rowHtml(r, i === recent.length - 1)).join("");
   }
 
+  // Commande groupée = même client, même date, au moins 2 carrosseries
+  function groupOf(r) {
+    if (!r.client || !r.date) return null;
+    const t = r.date.getTime();
+    const g = state.rows.filter((x) => x.client === r.client && x.date && x.date.getTime() === t);
+    return g.length > 1 ? { n: g.length, done: g.filter((x) => x.done).length } : null;
+  }
+
   function jobCard(r, u) {
+    const g = groupOf(r);
+    const label = g ? `<div class="grp-label">${icon("check")}Commande groupée · ${esc(r.client)} · ${g.done}/${g.n} fabriquée${g.done > 1 ? "s" : ""}</div>` : "";
     let n, lbl;
     if (u.cls === "unknown") { n = "?"; lbl = "sans date"; }
     else if (u.left < 0) { n = "+" + -u.left; lbl = -u.left > 1 ? "jours de retard" : "jour de retard"; }
     else if (u.left === 0) { n = "0"; lbl = "dernier jour"; }
     else { n = u.left; lbl = u.left > 1 ? "jours restants" : "jour restant"; }
     const pct = u.cls === "unknown" ? 0 : Math.min(100, Math.max(4, (u.age / cfg().delai) * 100));
-    return swipeWrap(r, "card", `<button class="job sw-front ${u.cls} ${r.color ? "has-band" : ""}" data-row="${r.r}">
+    return `<div class="jwrap">${label}` + swipeWrap(r, "card", `<button class="job sw-front ${u.cls} ${r.color ? "has-band" : ""}" data-row="${r.r}">
       ${colorBand(r.color)}
       <div class="job-title">${esc(r.name)}</div>
       ${mouleFlag(r.key) ? `<div class="job-flag">${mouleFlag(r.key)}</div>` : ""}
@@ -595,7 +606,7 @@
       ${r.client || r.obs ? `<div class="job-note">${esc([r.client, r.obs].filter(Boolean).join(" · "))}</div>` : ""}
       <div class="countdown"><div class="n">${n}</div><div class="t">${lbl}</div></div>
       <div class="progress"><i style="width:${pct}%"></i></div>
-    </button>`);
+    </button>`) + `</div>`;
   }
 
   // Droite = fait / pas fait · gauche = supprimer
@@ -851,7 +862,7 @@
       $$("#sheetBody button").forEach((b) => (b.disabled = true));
       try {
         await writeRow(r.r, values, r.model);
-        toast(msg);
+        if (!(values[1] === "F" && checkGroupDone(r.r))) toast(msg);
         if (close) closeSheet(); else openDetail(r.r);
       } catch (err) {
         $$("#sheetBody button").forEach((b) => (b.disabled = false));
@@ -918,6 +929,8 @@
           </div>
           <input name="colorOther" placeholder="Couleur / précision (ex : Noir 3 mm)" value="${esc(isOther ? r.colorRaw : "")}" style="margin-top:10px" ${isOther ? "" : "hidden"}>
         </div>
+        ${isNew ? `<div id="extraLines"></div>
+        <button type="button" class="btn ghost" id="addLine">${icon("plus")}Ajouter un autre modèle</button>` : ""}
         <div class="field"><label>Client / note</label>
           <input name="client" placeholder="Ex : Julien mail" value="${esc(r ? r.client : "")}"></div>
         <div class="field"><label>Observations</label>
@@ -932,7 +945,47 @@
     const checkMoule = () => { $("#modelMoule").innerHTML = mouleFlag(modelKey(form.model.value), true); };
     form.model.addEventListener("input", () => { $("#modelSuggest").innerHTML = suggestHtml(suggestModels(form.model.value)); checkMoule(); });
     let color = isOther ? "__other" : curColor;
+    // Commande groupée : un même client, plusieurs modèles (une ligne du tableau par carrosserie)
+    const lineHtml = () => `<div class="xline" data-xc="Noir">
+        <div class="xhead"><span class="xnum"></span><button type="button" class="xdel" data-xdel aria-label="Retirer ce modèle">${icon("trash")}</button></div>
+        <input class="xmodel" placeholder="Modèle (pi, max, cox…)" autocomplete="off" autocapitalize="sentences">
+        <div class="suggest xsuggest"></div>
+        <div class="xmoule"></div>
+        <div class="xcolors">${COLOR_CHOICES.map((c) => `<button type="button" data-xcolor="${c}" class="${c === "Noir" ? "active" : ""}" aria-label="${c}">${swatch(c, "lg")}</button>`).join("")}</div>
+      </div>`;
+    const renumber = () => $$(".xline .xnum", form).forEach((n, i) => (n.textContent = `Modèle ${i + 2}`));
+    const lineMoule = (line) => { line.querySelector(".xmoule").innerHTML = mouleFlag(modelKey(line.querySelector(".xmodel").value), true); };
+    $("#sheetBody").oninput = (e) => {
+      if (!e.target.classList.contains("xmodel")) return;
+      const line = e.target.closest(".xline");
+      line.querySelector(".xsuggest").innerHTML = suggestHtml(suggestModels(e.target.value)).replace(/data-model=/g, "data-xmodel=");
+      lineMoule(line);
+    };
     $("#sheetBody").onclick = (e) => {
+      if (e.target.closest("#addLine")) {
+        $("#extraLines").insertAdjacentHTML("beforeend", lineHtml());
+        renumber();
+        const inputs = $$(".xmodel", form); inputs[inputs.length - 1].focus();
+        return;
+      }
+      const xd = e.target.closest("[data-xdel]");
+      if (xd) { xd.closest(".xline").remove(); renumber(); return; }
+      const xm = e.target.closest("[data-xmodel]");
+      if (xm) {
+        const line = xm.closest(".xline");
+        line.querySelector(".xmodel").value = xm.dataset.xmodel;
+        line.querySelector(".xsuggest").innerHTML = "";
+        lineMoule(line);
+        return;
+      }
+      const xc = e.target.closest("[data-xcolor]");
+      if (xc) {
+        const line = xc.closest(".xline");
+        const c = line.dataset.xc === xc.dataset.xcolor ? "" : xc.dataset.xcolor;
+        line.dataset.xc = c;
+        $$("[data-xcolor]", line).forEach((b) => b.classList.toggle("active", b === xc && c !== ""));
+        return;
+      }
       const m = e.target.closest("[data-model]");
       if (m) { form.model.value = m.dataset.model; $("#modelSuggest").innerHTML = ""; checkMoule(); return; }
       const c = e.target.closest("[data-color]");
@@ -958,10 +1011,13 @@
       // Ancienne commande sans info de paiement : on ne touche pas la colonne si l'interrupteur n'a pas bougé
       const pay = !isNew && !r.pay && payOn ? null : PAY_VALUE[payOn ? "paid" : "unpaid"];
       const values = [dateChanged ? dateToSerial(date) : null, done, realName(clean(form.model.value)), colorVal, clean(form.client.value), clean(form.obs.value), pay];
+      const extra = isNew ? $$(".xline", form).map((l) => ({ model: clean(l.querySelector(".xmodel").value), color: l.dataset.xc || "" })).filter((l) => l.model) : [];
       try {
         await writeRow(isNew ? null : r.r, values, isNew ? null : r.model);
+        for (const l of extra) await writeRow(null, [values[0], done, realName(l.model), l.color, values[4], values[5], pay]);
         closeSheet();
-        toast(isNew ? "Commande ajoutée" : "Modifiée");
+        if (!isNew) toast("Modifiée");
+        else toast(extra.length ? `Commande groupée enregistrée · ${extra.length + 1} carrosseries` : "Commande ajoutée");
       } catch (err) { btn.disabled = false; toast("Échec : " + err.message, true); }
     };
   }
@@ -1324,6 +1380,21 @@
 
   // ---------- Messages ----------
   let toastTimer;
+  // Message vert en haut de l'écran (succès important)
+  function toastOk(msg) {
+    const t = $("#toast");
+    t.innerHTML = `${icon("check")}<span>${esc(msg)}</span>`; t.className = "toast ok"; t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 3200);
+  }
+  // Commande groupée (même client, même date) entièrement fabriquée ?
+  function checkGroupDone(rowNum) {
+    const r = state.rows.find((x) => x.r === rowNum);
+    if (!r || !r.done || !r.client || !r.date) return false;
+    const group = state.rows.filter((x) => x.client === r.client && x.date && x.date.getTime() === r.date.getTime());
+    if (group.length < 2 || group.some((x) => !x.done)) return false;
+    toastOk(`Commande complète · ${r.client} · tout est fabriqué`);
+    return true;
+  }
   function toast(msg, err) {
     const t = $("#toast");
     t.textContent = msg; t.className = "toast" + (err ? " error" : ""); t.hidden = false;
@@ -1363,7 +1434,7 @@
       if (!r) return;
       if (act.dataset.sw === "del") return confirmDelete(r);
       writeRow(r.r, [null, r.done ? "" : "F", null, null, null, null, null], r.model)
-        .then(() => toast(r.done ? "Remise en cours" : `${r.name} fabriquée`))
+        .then(() => { if (r.done || !checkGroupDone(r.r)) toast(r.done ? "Remise en cours" : `${r.name} fabriquée`); })
         .catch((err) => toast("Échec : " + err.message, true));
       return;
     }
