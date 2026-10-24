@@ -95,6 +95,22 @@
     return `<div class="cband${name === "Noir" ? " noir" : ""}" style="--c:${bg};--t:${light ? "#15161a" : "#fff"}">${esc(name)}</div>`;
   };
 
+  // Icônes au trait, même style que la barre de navigation
+  const ICONS = {
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.5 17.5l3 3 5.8-5.8a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+    euro: '<path d="M17.5 6.5a7 7 0 1 0 0 11M4 10h9M4 14h9"/>',
+    moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>',
+    auto: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17"/>',
+    alert: '<path d="M12 3.5L21.5 20h-19z"/><path d="M12 10v4.5M12 17.2v.3"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    mold: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5L12 12l8-4.5M12 12v9"/>',
+  };
+  const icon = (name, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+
   // ---------- État ----------
   const state = {
     rows: [],          // commandes (lignes avec un modèle)
@@ -107,6 +123,9 @@
     hist: { q: "", status: "all", list: [], shown: 0 },
     topRange: "365",
     topCount: "10",
+    moules: [],        // moules (feuille "Moules")
+    mmatrix: null,     // valeurs brutes de la feuille Moules
+    mouleAlert: {},    // modèle -> moule cassé ou en séchage
   };
 
   function buildRows(matrix) {
@@ -151,6 +170,44 @@
     state.matrix = matrix;
   }
 
+  // ---------- Moules : A Modèle · B État · C Note · D Lieu ----------
+  const MOULE_HEAD = ["Modèle", "État", "Note", "Lieu"];
+  const LIEUX = ["Chez Jean", "À l'atelier"];
+  const MOULE_LABEL = { ok: "OK", casse: "Cassé", sechage: "Séchage" };
+  function mouleState(raw) {
+    const f = fold(raw);
+    if (f.startsWith("cass")) return "casse";
+    if (f.startsWith("sech")) return "sechage";
+    return "ok";
+  }
+  function buildMoules(m) {
+    if (!m || !m.length) m = [MOULE_HEAD.slice()];
+    const list = [];
+    for (let i = 1; i < m.length; i++) {
+      const a = m[i] || [];
+      const model = clean(a[0]);
+      if (!model) continue;
+      list.push({ r: i + 1, model, key: modelKey(model), etat: mouleState(a[1]), note: clean(a[2]), lieu: clean(a[3]) });
+    }
+    // Pour chaque modèle : le moule le plus bloquant (cassé avant séchage)
+    const alert = {};
+    for (const x of list) {
+      if (x.etat === "ok") continue;
+      const cur = alert[x.key];
+      if (!cur || (x.etat === "casse" && cur.etat !== "casse")) alert[x.key] = x;
+    }
+    state.moules = list;
+    state.mmatrix = m;
+    state.mouleAlert = alert;
+  }
+  // Voyant sur une commande dont le moule est cassé ou en séchage
+  function mouleFlag(key, long) {
+    const x = state.mouleAlert[key];
+    if (!x) return "";
+    if (x.etat === "casse") return `<span class="mflag casse">${icon("alert")}Moule cassé</span>`;
+    return `<span class="mflag sechage">${icon("clock")}Moule en séchage</span>`;
+  }
+
   // "" = non renseigné (anciennes commandes) · "paid" · "unpaid"
   function payState(raw) {
     const f = fold(raw);
@@ -160,7 +217,7 @@
     return "";
   }
   const PAY_VALUE = { paid: "Payé", unpaid: "Non payé" };
-  const payPill = (r) => r.pay ? `<span class="pay ${r.pay}">€ ${r.pay === "paid" ? "Payée" : "Non payée"}</span>` : "";
+  const payPill = (r) => r.pay ? `<span class="pay ${r.pay}">${icon("euro")}${r.pay === "paid" ? "Payée" : "Non payée"}</span>` : "";
 
   function urgency(r) {
     if (r.done) return null;
@@ -190,7 +247,7 @@
       if (!j.ok) { const err = new Error(j.error || "Erreur"); err.auth = /code/i.test(j.error || ""); throw err; }
       return j;
     },
-    async load() { return (await this.call({ action: "read" })).values; },
+    async load() { return this.call({ action: "read" }); },
   };
 
   // ---------- File d'envoi en arrière-plan ----------
@@ -239,7 +296,7 @@
     const n = queue.items.length;
     $("#syncInfo").textContent = state.source === "file"
       ? `Fichier : ${state.fileName}`
-      : n ? `⏳ ${n} modif${n > 1 ? "s" : ""} en attente d'envoi`
+      : n ? `${n} modif${n > 1 ? "s" : ""} en attente d'envoi…`
       : state.syncedAt ? `Synchro ${new Date(state.syncedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · ${state.rows.length} cdes` : "—";
   }
 
@@ -275,6 +332,32 @@
     }
     m.splice(i, 1);
     buildRows(m);
+    saveCache();
+    renderAll();
+  }
+
+  // values = [modèle, état, note, lieu] ; "" = vider ; null = ne pas toucher
+  async function writeMoule(rowNum, values, expect) {
+    const m = state.mmatrix || [MOULE_HEAD.slice()];
+    const isNew = !rowNum;
+    if (isNew) rowNum = (state.moules.length ? Math.max(...state.moules.map((x) => x.r)) : 1) + 1;
+    if (state.source === "sheet") {
+      const send = values.map((v) => (typeof v === "number" ? (() => { const d = serialToDate(v); return [d.getFullYear(), d.getMonth() + 1, d.getDate()]; })() : v));
+      enqueue(isNew ? { action: "add", sheet: "moules", values: send, localRow: rowNum } : { action: "update", sheet: "moules", row: rowNum, expect, values: send });
+    }
+    while (m.length < rowNum) m.push([]);
+    const row = m[rowNum - 1] = (m[rowNum - 1] || []).slice();
+    values.forEach((v, j) => { if (v !== null) row[j] = v; });
+    buildMoules(m);
+    saveCache();
+    renderAll();
+  }
+
+  async function deleteMoule(x) {
+    if (state.source === "sheet") enqueue({ action: "delete", sheet: "moules", row: x.r, expect: x.model });
+    const m = state.mmatrix;
+    m.splice(x.r - 1, 1);
+    buildMoules(m);
     saveCache();
     renderAll();
   }
@@ -349,7 +432,7 @@
   // ---------- Cache local (affichage instantané) ----------
   function saveCache() {
     if (state.source !== "sheet") return;
-    LS.set("pc_cache", { matrix: state.matrix, at: state.syncedAt });
+    LS.set("pc_cache", { matrix: state.matrix, mmatrix: state.mmatrix, at: state.syncedAt });
   }
 
   // ---------- Chargement ----------
@@ -364,13 +447,14 @@
     const btn = $("#btnRefresh");
     btn.classList.add("spin");
     try {
-      const m = await api.load();
+      const res = await api.load();
       state.syncedAt = Date.now();
-      buildRows(m);
+      buildRows(res.values);
+      buildMoules(res.moules);
       saveCache();
       hideBanner();
       renderAll();
-      if (!silent) toast("À jour ✓");
+      if (!silent) toast("À jour");
       return true;
     } catch (e) {
       console.error(e);
@@ -394,6 +478,8 @@
       state.fileName = file.name;
       state.syncedAt = Date.now();
       buildRows(m);
+      const mName = wb.SheetNames.find((n) => /^moules?$/.test(fold(n)));
+      buildMoules(mName ? XLSX.utils.sheet_to_json(wb.Sheets[mName], { header: 1, raw: true, defval: null }) : null);
       $("#welcome").hidden = true;
       banner("Mode fichier : les modifications restent sur l'appli, elles ne sont pas enregistrées dans Excel.");
       renderAll();
@@ -427,7 +513,7 @@
       <div class="kpi"><div class="v">${month}</div><div class="l">Commandes en ${fmt(t, { month: "long" })}</div></div>`;
 
     $("#todoList").innerHTML = todo.length ? todo.map(({ r, u }) => jobCard(r, u)).join("") :
-      `<div class="empty"><b>Tout est fabriqué 🎉</b>Aucune commande en attente.</div>`;
+      `<div class="empty"><b>Tout est fabriqué</b>Aucune commande en attente.</div>`;
 
     const recent = state.rows.filter((r) => r.done).slice(-6).reverse();
     $("#recentList").innerHTML = recent.map((r, i) => rowHtml(r, i === recent.length - 1)).join("");
@@ -443,6 +529,7 @@
     return swipeWrap(r, "card", `<button class="job sw-front ${u.cls} ${r.color ? "has-band" : ""}" data-row="${r.r}">
       ${colorBand(r.color)}
       <div class="job-title">${esc(r.name)}</div>
+      ${mouleFlag(r.key) ? `<div class="job-flag">${mouleFlag(r.key)}</div>` : ""}
       <div class="job-meta">
         <span>${r.date ? "Cdé le " + fmt(r.date, { day: "numeric", month: "short" }) : "Date inconnue"}</span>
         ${payPill(r)}
@@ -456,8 +543,8 @@
   // Droite = fait / pas fait · gauche = supprimer
   function swipeWrap(r, cls, inner) {
     return `<div class="swipe ${cls}" data-swipe="${r.r}">
-      <button class="sw-act sw-done" data-sw="done" tabindex="-1">${r.done ? "↺ Pas fait" : "✓ Fait"}</button>
-      <button class="sw-act sw-del" data-sw="del" tabindex="-1">🗑 Supprimer</button>
+      <button class="sw-act sw-done" data-sw="done" tabindex="-1">${r.done ? icon("undo") + "Pas fait" : icon("check") + "Fait"}</button>
+      <button class="sw-act sw-del" data-sw="del" tabindex="-1">${icon("trash")}Supprimer</button>
       ${inner}
     </div>`;
   }
@@ -558,10 +645,34 @@
     renderHome();
     if (state.view === "history") filterHistory();
     if (state.view === "stats") renderStats();
+    if (state.view === "moules") renderMoules();
+  }
+
+  // ---------- Rendu : Moules ----------
+  function renderMoules() {
+    const waiting = {};
+    for (const r of state.rows) if (!r.done) waiting[r.key] = (waiting[r.key] || 0) + 1;
+    const order = { casse: 0, sechage: 1, ok: 2 };
+    const list = state.moules.slice().sort((a, b) => order[a.etat] - order[b.etat] || a.model.localeCompare(b.model, "fr"));
+    const n = (e) => state.moules.filter((x) => x.etat === e).length;
+    $("#mouleSummary").innerHTML = `
+      <div class="mstat casse"><b>${n("casse")}</b>Cassé${n("casse") > 1 ? "s" : ""}</div>
+      <div class="mstat sechage"><b>${n("sechage")}</b>En séchage</div>
+      <div class="mstat ok"><b>${n("ok")}</b>OK</div>`;
+    $("#mouleList").innerHTML = list.length ? list.map((x) => {
+      const w = waiting[x.key] || 0;
+      const sub = x.note;
+      const lieu = x.lieu ? `<span class="mlieu">${esc(x.lieu)}</span>` : "";
+      return `<button class="mcard ${x.etat}" data-moule="${x.r}">
+        <span class="mstate">${icon(x.etat === "casse" ? "alert" : x.etat === "sechage" ? "clock" : "check")}</span>
+        <span class="mmain"><span class="mname">${esc(x.model)}</span>${sub ? `<span class="msub">${esc(sub)}</span>` : ""}</span>
+        <span class="mside"><span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>${lieu}${w ? `<span class="mwait">${w} cde${w > 1 ? "s" : ""} en attente</span>` : ""}</span>
+      </button>`;
+    }).join("") : `<div class="empty"><b>Aucun moule enregistré</b>Ajoute tes moules avec le bouton +, puis indique s'ils sont cassés ou en séchage.</div>`;
   }
 
   // ---------- Navigation ----------
-  const TITLES = { home: "Atelier", history: "Historique", stats: "Statistiques" };
+  const TITLES = { home: "Atelier", history: "Historique", stats: "Statistiques", moules: "Moules" };
   function show(view) {
     state.view = view;
     $$(".view").forEach((v) => (v.hidden = v.id !== "view-" + view));
@@ -569,6 +680,7 @@
     $("#pageTitle").textContent = TITLES[view];
     if (view === "history") filterHistory();
     if (view === "stats") renderStats();
+    if (view === "moules") renderMoules();
     window.scrollTo({ top: 0 });
   }
 
@@ -587,7 +699,7 @@
     const r = state.rows.find((x) => x.r === rowNum);
     if (!r) return;
     const u = urgency(r);
-    let statut = "Fabriquée ✓";
+    let statut = "Fabriquée";
     if (u) statut = u.cls === "unknown" ? "À faire" : u.left < 0 ? `En retard de ${-u.left} j` : `À faire · ${u.left} j restant${u.left > 1 ? "s" : ""}`;
     const payTxt = r.pay === "paid" ? "Payée" : r.pay === "unpaid" ? "Non payée" : "Non renseigné";
     openSheet(`
@@ -595,12 +707,13 @@
         ${swatch(r.color, "lg")}
         <div><h3>${esc(r.name)}</h3><span class="status ${r.done ? "done" : "todo"}" ${u ? `style="--u:var(--${u.cls === "unknown" ? "muted" : u.cls})"` : ""}>${esc(statut)}</span></div>
       </div>
+      ${mouleFlag(r.key) && !r.done ? `<div class="mwarn">${mouleFlag(r.key, true)}</div>` : ""}
       <div class="quick">
         <button class="qbtn ${r.done ? "on-done" : ""}" data-act="done">
-          <span class="ico">${r.done ? "✓" : "🔧"}</span>${r.done ? "Fabriquée" : "Marquer fabriquée"}<small>${r.done ? "appuyer pour annuler" : "en cours"}</small>
+          ${icon(r.done ? "check" : "tool", "q")}${r.done ? "Fabriquée" : "Marquer fabriquée"}<small>${r.done ? "appuyer pour annuler" : "en cours"}</small>
         </button>
         <button class="qbtn ${r.pay === "paid" ? "on-paid" : r.pay === "unpaid" ? "on-unpaid" : ""}" data-act="pay">
-          <span class="ico">€</span>${payTxt}<small>appuyer pour changer</small>
+          ${icon("euro", "q")}${payTxt}<small>appuyer pour changer</small>
         </button>
       </div>
       <div class="qlabel">Couleur</div>
@@ -640,30 +753,33 @@
       }
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "edit") return openForm(r);
-      if (act === "done") return save([null, r.done ? "" : "F", null, null, null, null, null], r.done ? "Remise en cours" : `${r.name} fabriquée ✓`, !r.done);
-      if (act === "pay") return save([null, null, null, null, null, null, PAY_VALUE[r.pay === "paid" ? "unpaid" : "paid"]], r.pay === "paid" ? "Non payée" : "Payée ✓");
-      if (act === "note") return save([null, null, null, null, clean($("#qNote").value), null, null], "Note enregistrée ✓");
+      if (act === "done") return save([null, r.done ? "" : "F", null, null, null, null, null], r.done ? "Remise en cours" : `${r.name} fabriquée`, !r.done);
+      if (act === "pay") return save([null, null, null, null, null, null, PAY_VALUE[r.pay === "paid" ? "unpaid" : "paid"]], r.pay === "paid" ? "Non payée" : "Payée");
+      if (act === "note") return save([null, null, null, null, clean($("#qNote").value), null, null], "Note enregistrée");
     };
   }
 
   const COLOR_CHOICES = ["Noir", "Blanc", "Bleu", "Jaune", "Rouge", "Vert"];
+  // Modèles connus, les plus commandés d'abord (la dernière année compte double)
+  function knownModels() {
+    const c = {}; const from = addDays(today(), -365);
+    for (const x of state.rows) c[x.name] = (c[x.name] || 0) + (x.date && x.date > from ? 2 : 1);
+    return Object.entries(c).sort((a, b) => b[1] - a[1]).map(([name]) => ({ name, words: fold(name).split(/[\s/.-]+/).filter(Boolean) }));
+  }
+  // "pi fin" -> chaque mot tapé doit être le début d'un mot du modèle
+  function suggestFrom(models, q) {
+    const terms = fold(q).split(/\s+/).filter(Boolean);
+    if (!terms.length) return models.slice(0, 8);
+    return models.filter((m) => terms.every((t) => m.words.some((w) => w.startsWith(t)) || fold(m.name).replace(/\s/g, "").startsWith(t)))
+      .filter((m) => fold(m.name) !== fold(q))
+      .slice(0, 8);
+  }
+  const suggestHtml = (list) => list.map((m) => `<button type="button" data-model="${esc(m.name)}">${esc(m.name)}</button>`).join("");
+
   function openForm(r) {
     const isNew = !r;
-    // Modèles connus, les plus commandés d'abord (la dernière année compte double)
-    const models = (() => {
-      const c = {}; const from = addDays(today(), -365);
-      for (const x of state.rows) c[x.name] = (c[x.name] || 0) + (x.date && x.date > from ? 2 : 1);
-      return Object.entries(c).sort((a, b) => b[1] - a[1]).map(([name]) => ({ name, words: fold(name).split(/[\s/.-]+/).filter(Boolean) }));
-    })();
-    // "pi fin" -> chaque mot tapé doit être le début d'un mot du modèle
-    const suggestModels = (q) => {
-      const terms = fold(q).split(/\s+/).filter(Boolean);
-      if (!terms.length) return models.slice(0, 8);
-      return models.filter((m) => terms.every((t) => m.words.some((w) => w.startsWith(t)) || fold(m.name).replace(/\s/g, "").startsWith(t)))
-        .filter((m) => fold(m.name) !== fold(q))
-        .slice(0, 8);
-    };
-    const suggestHtml = (list) => list.map((m) => `<button type="button" data-model="${esc(m.name)}">${esc(m.name)}</button>`).join("");
+    const models = knownModels();
+    const suggestModels = (q) => suggestFrom(models, q);
     const curColor = r ? r.color : "Noir";
     const isOther = r && r.color && !COLOR_CHOICES.includes(r.color);
     openSheet(`
@@ -675,6 +791,7 @@
         <div class="field"><label>Modèle</label>
           <input name="model" placeholder="Tape les premières lettres : pi, max, cox…" value="${esc(r ? r.model : "")}" required autocomplete="off" autocapitalize="sentences">
           <div class="suggest" id="modelSuggest">${isNew ? suggestHtml(suggestModels("")) : ""}</div>
+          <div id="modelMoule">${r && !r.done ? mouleFlag(r.key, true) : ""}</div>
         </div>
         <div class="field"><label>Couleur</label>
           <div class="color-pick">
@@ -693,11 +810,13 @@
       </form>`);
 
     const form = $("#orderForm");
-    form.model.addEventListener("input", () => { $("#modelSuggest").innerHTML = suggestHtml(suggestModels(form.model.value)); });
+    // Prévient dès que le modèle tapé a un moule cassé ou en séchage
+    const checkMoule = () => { $("#modelMoule").innerHTML = mouleFlag(modelKey(form.model.value), true); };
+    form.model.addEventListener("input", () => { $("#modelSuggest").innerHTML = suggestHtml(suggestModels(form.model.value)); checkMoule(); });
     let color = isOther ? "__other" : curColor;
     $("#sheetBody").onclick = (e) => {
       const m = e.target.closest("[data-model]");
-      if (m) { form.model.value = m.dataset.model; $("#modelSuggest").innerHTML = ""; return; }
+      if (m) { form.model.value = m.dataset.model; $("#modelSuggest").innerHTML = ""; checkMoule(); return; }
       const c = e.target.closest("[data-color]");
       if (c) {
         // Même couleur touchée une 2e fois = aucune couleur
@@ -724,8 +843,118 @@
       try {
         await writeRow(isNew ? null : r.r, values, isNew ? null : r.model);
         closeSheet();
-        toast(isNew ? "Commande ajoutée ✓" : "Modifiée ✓");
+        toast(isNew ? "Commande ajoutée" : "Modifiée");
       } catch (err) { btn.disabled = false; toast("Échec : " + err.message, true); }
+    };
+  }
+
+  // Fiche d'un moule : changer l'état en un appui
+  function openMoule(rowNum) {
+    const x = state.moules.find((m) => m.r === rowNum);
+    if (!x) return;
+    const w = state.rows.filter((r) => !r.done && r.key === x.key).length;
+    openSheet(`
+      <div class="detail-head">
+        <span class="mstate big ${x.etat}">${icon(x.etat === "casse" ? "alert" : x.etat === "sechage" ? "clock" : "check")}</span>
+        <div><h3>${esc(x.model)}</h3><span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>
+        ${w ? `<span class="muted"> · ${w} commande${w > 1 ? "s" : ""} en attente</span>` : ""}</div>
+      </div>
+      <div class="qlabel">État du moule</div>
+      <div class="mchoice">
+        <button class="${x.etat === "ok" ? "active ok" : ""}" data-etat="ok">${icon("check")}OK</button>
+        <button class="${x.etat === "casse" ? "active casse" : ""}" data-etat="casse">${icon("alert")}Cassé</button>
+        <button class="${x.etat === "sechage" ? "active sechage" : ""}" data-etat="sechage">${icon("clock")}Séchage</button>
+      </div>
+      <div class="qlabel">Où est le moule ?</div>
+      <div class="mchoice lieu">
+        ${LIEUX.map((l) => `<button data-lieu="${esc(l)}" class="${x.lieu === l ? "active lieu" : ""}">${esc(l)}</button>`).join("")}
+      </div>
+      <div class="qlabel">Note</div>
+      <div class="qnote">
+        <textarea id="mNote" placeholder="Ex : fissure côté capot, 2e moule en cours…">${esc(x.note)}</textarea>
+        <button data-act="note">OK</button>
+      </div>
+      <button class="btn ghost danger-text" data-act="del" style="width:100%">${icon("trash")}Supprimer ce moule</button>`);
+
+    const save = async (values, msg) => {
+      try { await writeMoule(x.r, values, x.model); toast(msg); openMoule(x.r); }
+      catch (err) { toast("Échec : " + err.message, true); }
+    };
+    $("#sheetBody").onclick = async (e) => {
+      const li = e.target.closest("[data-lieu]");
+      if (li) {
+        // Même lieu touché une 2e fois = on l'enlève
+        const lieu = li.dataset.lieu === x.lieu ? "" : li.dataset.lieu;
+        return save([null, null, null, lieu], lieu ? lieu : "Lieu enlevé");
+      }
+      const b = e.target.closest("[data-etat]");
+      if (b) {
+        const etat = b.dataset.etat;
+        if (etat === x.etat) return;
+        return save([null, MOULE_LABEL[etat], null, null], etat === "ok" ? "Moule OK" : etat === "casse" ? "Moule cassé" : "Moule en séchage");
+      }
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "note") return save([null, null, clean($("#mNote").value), null], "Note enregistrée");
+      if (act === "del") {
+        if (!e.target.closest("[data-act]").classList.contains("confirm")) {
+          const btn = e.target.closest("[data-act]");
+          btn.classList.add("confirm"); btn.innerHTML = `${icon("trash")}Appuie encore pour confirmer`;
+          return;
+        }
+        await deleteMoule(x); closeSheet(); toast("Moule supprimé");
+      }
+    };
+  }
+
+  // Ajout d'un moule
+  function openMouleForm() {
+    const models = knownModels();
+    let etat = "casse", lieu = "";
+    openSheet(`
+      <h3>Nouveau moule</h3>
+      <form class="form" id="mouleForm" autocomplete="off">
+        <div class="field"><label>Modèle</label>
+          <input name="model" placeholder="Tape les premières lettres : pi, max, cox…" required autocomplete="off" autocapitalize="sentences">
+          <div class="suggest" id="mSuggest">${suggestHtml(suggestFrom(models, ""))}</div>
+        </div>
+        <div class="field"><label>État</label>
+          <div class="mchoice">
+            <button type="button" data-etat="ok">${icon("check")}OK</button>
+            <button type="button" data-etat="casse" class="active casse">${icon("alert")}Cassé</button>
+            <button type="button" data-etat="sechage">${icon("clock")}Séchage</button>
+          </div>
+        </div>
+        <div class="field"><label>Où est le moule ?</label>
+          <div class="mchoice lieu">${LIEUX.map((l) => `<button type="button" data-lieu="${esc(l)}">${esc(l)}</button>`).join("")}</div>
+        </div>
+        <div class="field"><label>Note</label><textarea name="note" placeholder="Optionnel"></textarea></div>
+        <button class="btn primary" type="submit">Ajouter le moule</button>
+      </form>`);
+    const f = $("#mouleForm");
+    f.model.addEventListener("input", () => { $("#mSuggest").innerHTML = suggestHtml(suggestFrom(models, f.model.value)); });
+    $("#sheetBody").onclick = (e) => {
+      const m = e.target.closest("[data-model]");
+      if (m) { f.model.value = m.dataset.model; $("#mSuggest").innerHTML = ""; return; }
+      const li = e.target.closest("[data-lieu]");
+      if (li) {
+        lieu = li.dataset.lieu === lieu ? "" : li.dataset.lieu;
+        $$(".mchoice.lieu button", f).forEach((x) => (x.className = x === li && lieu ? "active lieu" : ""));
+        return;
+      }
+      const b = e.target.closest("[data-etat]");
+      if (b) {
+        etat = b.dataset.etat;
+        $$(".mchoice:not(.lieu) button", f).forEach((x) => (x.className = x === b ? "active " + etat : ""));
+      }
+    };
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const model = clean(f.model.value);
+      const same = state.moules.find((x) => x.key === modelKey(model));
+      if (same) { toast("Ce moule existe déjà"); return openMoule(same.r); }
+      await writeMoule(null, [model, MOULE_LABEL[etat], clean(f.note.value), lieu]);
+      closeSheet();
+      toast("Moule ajouté");
     };
   }
 
@@ -737,7 +966,7 @@
       <form class="form" id="setForm" autocomplete="off">
         <div class="field"><label>Thème</label>
           <div class="seg full" id="themeSeg">
-            ${[["dark", "🌙 Sombre"], ["light", "☀️ Clair"], ["auto", "Auto"]].map(([v, l]) => `<button type="button" data-theme="${v}" class="${LS.get("pc_theme", "dark") === v ? "active" : ""}">${l}</button>`).join("")}
+            ${[["dark", "moon", "Sombre"], ["light", "sun", "Clair"], ["auto", "auto", "Auto"]].map(([v, ic, l]) => `<button type="button" data-theme="${v}" class="${LS.get("pc_theme", "dark") === v ? "active" : ""}">${icon(ic)}${l}</button>`).join("")}
           </div>
         </div>
         <div class="field"><label>Délai de fabrication (jours)</label><input name="delai" type="number" min="1" max="90" value="${c.delai}"></div>
@@ -793,7 +1022,7 @@
       LS.set("pc_key", f.key.value.trim());
       state.source = "sheet";
       closeSheet();
-      if (await refresh(true)) toast(`Connecté ✓ ${state.rows.length} commandes`);
+      if (await refresh(true)) toast(`Connecté · ${state.rows.length} commandes`);
     };
     setTimeout(() => f.key.focus(), 250);
   }
@@ -812,6 +1041,7 @@
   $$(".tab").forEach((t) => (t.onclick = () => show(t.dataset.view)));
   $("#fab").onclick = () => {
     if (!state.source) { $("#welcome").hidden = false; return; }
+    if (state.view === "moules") return openMouleForm();
     openForm(null);
   };
   $("#btnRefresh").onclick = () => refresh(false);
@@ -832,13 +1062,15 @@
       if (!r) return;
       if (act.dataset.sw === "del") return confirmDelete(r);
       writeRow(r.r, [null, r.done ? "" : "F", null, null, null, null, null], r.model)
-        .then(() => toast(r.done ? "Remise en cours" : `${r.name} fabriquée ✓`))
+        .then(() => toast(r.done ? "Remise en cours" : `${r.name} fabriquée`))
         .catch((err) => toast("Échec : " + err.message, true));
       return;
     }
     const w = e.target.closest(".swipe");
     if (w && (Date.now() - (w._swipedAt || 0) < 400)) return; // fin d'un glisser, pas un appui
     if (w && w === swOpen) return closeSwipe();
+    const mo = e.target.closest("[data-moule]");
+    if (mo) return openMoule(Number(mo.dataset.moule));
     const el = e.target.closest("[data-row]");
     if (el) openDetail(Number(el.dataset.row));
   });
@@ -888,7 +1120,7 @@
     if (api.ready()) {
       state.source = "sheet";
       const cache = LS.get("pc_cache", null);
-      if (cache && cache.matrix) { state.syncedAt = cache.at; buildRows(cache.matrix); }
+      if (cache && cache.matrix) { state.syncedAt = cache.at; buildRows(cache.matrix); buildMoules(cache.mmatrix); }
       renderAll();
       refresh(true);
       return;
