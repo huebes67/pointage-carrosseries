@@ -1,8 +1,8 @@
 // Garde l'interface en cache pour un démarrage instantané (les données viennent toujours du tableau).
 // Changer VERSION à chaque mise en ligne pour forcer la mise à jour sur les téléphones.
-const VERSION = "pc-v24";
+const VERSION = "pc-v25";
 const SHELL = [
-  "./", "index.html", "style.css", "app.js", "config.js", "manifest.webmanifest",
+  "./", "index.html", "style.css", "theme.js", "app.js", "config.js", "manifest.webmanifest",
   "vendor/xlsx.full.min.js",
   "logo.png", "icons/icon-192.png", "icons/apple-touch-icon.png",
 ];

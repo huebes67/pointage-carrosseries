@@ -735,6 +735,11 @@
       <h3>Réglages</h3>
       <p class="muted" style="margin:0 0 14px">${state.source === "sheet" ? "Connecté au tableau Google Sheets" : state.source === "file" ? `Fichier local : ${esc(state.fileName)}` : "Aucune source"}</p>
       <form class="form" id="setForm" autocomplete="off">
+        <div class="field"><label>Thème</label>
+          <div class="seg full" id="themeSeg">
+            ${[["dark", "🌙 Sombre"], ["light", "☀️ Clair"], ["auto", "Auto"]].map(([v, l]) => `<button type="button" data-theme="${v}" class="${LS.get("pc_theme", "dark") === v ? "active" : ""}">${l}</button>`).join("")}
+          </div>
+        </div>
         <div class="field"><label>Délai de fabrication (jours)</label><input name="delai" type="number" min="1" max="90" value="${c.delai}"></div>
         <div class="field"><label>Adresse du script Google</label><input name="url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(c.scriptUrl)}"></div>
         <button class="btn primary" type="submit">Enregistrer</button>
@@ -744,6 +749,13 @@
         ${c.key ? `<button class="btn ghost" id="btnForget">Oublier le code</button>` : `<button class="btn ghost" id="btnCode2">Code d'accès</button>`}
       </div>`);
     const f = $("#setForm");
+    // Le thème s'applique tout de suite, sans attendre "Enregistrer"
+    $("#themeSeg").onclick = (e) => {
+      const b = e.target.closest("[data-theme]"); if (!b) return;
+      LS.set("pc_theme", b.dataset.theme);
+      if (window.applyTheme) window.applyTheme();
+      $$("#themeSeg button").forEach((x) => x.classList.toggle("active", x === b));
+    };
     f.onsubmit = async (e) => {
       e.preventDefault();
       LS.set("pc_delai", Math.max(1, Number(f.delai.value) || 10));
