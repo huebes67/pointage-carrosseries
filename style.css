@@ -568,3 +568,7 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .mchoice.scale button { padding: 11px 2px; }
 .mplace { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
 .mplace.atelier { color: var(--accent); border-color: rgba(255,122,26,.45); background: rgba(255,122,26,.08); }
+
+/* Moules glissables */
+.mswipe { border-radius: 16px; }
+.mswipe .sw-del { width: 70%; }

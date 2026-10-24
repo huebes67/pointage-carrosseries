@@ -203,14 +203,22 @@
   const MOULE_HEAD = ["Modèle", "État", "Note", "Lieu", "Échelle"];
   const ECHELLES = ["1/5", "1/7", "1/8", "1/10", "1/16"];
   // Échelle écrite dans le nom du modèle ("Cox baja 1/10", "Truggy 1/8"…)
+  // Google Sheets transforme "1/10" en date (1er octobre) : on relit "01/10/2026" comme 1/10
+  function readScale(raw) {
+    const t = clean(raw).replace(/^'/, "");
+    const d = t.match(/^0?1\/(\d{1,2})\/\d{2,4}$/);
+    if (d && ECHELLES.includes("1/" + Number(d[1]))) return "1/" + Number(d[1]);
+    return t;
+  }
   function scaleFromName(name) {
     const m = String(name || "").match(/\b1\s*\/\s*(5|7|8|10|16)\b/);
     return m ? "1/" + m[1] : "";
   }
   const LIEUX = ["Chez Jean", "À l'atelier"];
-  const MOULE_LABEL = { ok: "OK", casse: "Cassé", sechage: "Séchage" };
+  const MOULE_LABEL = { ok: "OK", casse: "Cassé", sechage: "Séchage", supprime: "Supprimé" };
   function mouleState(raw) {
     const f = fold(raw);
+    if (f.startsWith("supprim")) return "supprime";
     if (f.startsWith("cass")) return "casse";
     if (f.startsWith("sech")) return "sechage";
     return "ok";
@@ -222,12 +230,12 @@
       const a = m[i] || [];
       const model = clean(a[0]);
       if (!model) continue;
-      list.push({ r: i + 1, model, key: modelKey(model), etat: mouleState(a[1]), note: clean(a[2]), lieu: clean(a[3]), scale: clean(a[4]) });
+      list.push({ r: i + 1, model, key: modelKey(model), etat: mouleState(a[1]), note: clean(a[2]), lieu: clean(a[3]), scale: readScale(a[4]), scaleRaw: clean(a[4]) });
     }
     // Pour chaque modèle : le moule le plus bloquant (cassé avant séchage)
     const alert = {};
     for (const x of list) {
-      if (x.etat === "ok") continue;
+      if (x.etat !== "casse" && x.etat !== "sechage") continue;
       const cur = alert[x.key];
       if (!cur || (x.etat === "casse" && cur.etat !== "casse")) alert[x.key] = x;
     }
@@ -377,7 +385,12 @@
     const isNew = !rowNum;
     if (isNew) rowNum = (state.moules.length ? Math.max(...state.moules.map((x) => x.r)) : 1) + 1;
     if (state.source === "sheet") {
-      const send = values.map((v) => (typeof v === "number" ? (() => { const d = serialToDate(v); return [d.getFullYear(), d.getMonth() + 1, d.getDate()]; })() : v));
+      const send = values.map((v, j) => {
+        if (typeof v === "number") { const d = serialToDate(v); return [d.getFullYear(), d.getMonth() + 1, d.getDate()]; }
+        // l'apostrophe force le texte : sinon Google Sheets transforme "1/10" en date
+        if (j === 4 && typeof v === "string" && /^1\/\d+$/.test(v)) return "'" + v;
+        return v;
+      });
       enqueue(isNew ? { action: "add", sheet: "moules", values: send, localRow: rowNum } : { action: "update", sheet: "moules", row: rowNum, expect, values: send });
     }
     while (m.length < rowNum) m.push([]);
@@ -386,6 +399,14 @@
     buildMoules(m);
     saveCache();
     renderAll();
+  }
+
+  // Réécrit en texte les échelles que Google Sheets avait changées en date (une seule fois)
+  function repairScales() {
+    if (state.source !== "sheet") return;
+    for (const x of state.moules) {
+      if (x.scale && x.scaleRaw !== x.scale) writeMoule(x.r, [null, null, null, null, x.scale], x.model);
+    }
   }
 
   async function deleteMoule(x) {
@@ -449,7 +470,7 @@
       else if (Math.abs(dy) > 10) { sw = null; return; }
       else return;
     }
-    setSwipe(sw.w, Math.max(-150, Math.min(150, sw.base + dx)), false);
+    setSwipe(sw.w, Math.max(-150, Math.min(sw.w.dataset.noright ? 0 : 150, sw.base + dx)), false);
   });
   const endSwipe = () => {
     if (!sw) return;
@@ -486,6 +507,7 @@
       state.syncedAt = Date.now();
       buildRows(res.values);
       buildMoules(res.moules);
+      repairScales();
       saveCache();
       hideBanner();
       renderAll();
@@ -699,7 +721,7 @@
     const byKey = {};
     for (const x of state.moules) byKey[x.key] = { ...x, model: names[x.key] || x.model, lieu: x.lieu || LIEU_JEAN };
     for (const k of auto) if (!byKey[k]) byKey[k] = { r: null, model: names[k], key: k, etat: "ok", note: "", lieu: LIEU_JEAN, scale: "", virtual: true };
-    const list = Object.values(byKey);
+    const list = Object.values(byKey).filter((x) => x.etat !== "supprime");
     for (const x of list) x.echelle = ECHELLES.includes(x.scale) ? x.scale : scaleFromName(x.model);
     return list;
   }
@@ -715,12 +737,14 @@
 
   function mouleCard(x, waiting) {
     const w = waiting[x.key] || 0;
-    return `<div class="mcard ${x.etat}" data-moule="${esc(x.key)}" role="button" tabindex="0">
+    return `<div class="swipe mswipe" data-mswipe="${esc(x.key)}" data-noright="1">
+      <button class="sw-act sw-del" data-sw="mdel" tabindex="-1">${icon("trash")}Supprimer</button>
+      <div class="mcard sw-front ${x.etat}" data-moule="${esc(x.key)}" role="button" tabindex="0">
       <span class="mstate">${icon(x.etat === "casse" ? "alert" : x.etat === "sechage" ? "clock" : "check")}</span>
       <span class="mmain"><span class="mname">${esc(x.model)}${x.echelle && x.echelle !== scaleFromName(x.model) ? ` <span class="mscale">${x.echelle}</span>` : ""}</span>${x.note ? `<span class="msub">${esc(x.note)}</span>` : ""}
         ${x.etat !== "ok" || w ? `<span class="mline">${x.etat !== "ok" ? `<span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>` : ""}${w ? `<span class="mwait">${w} cde${w > 1 ? "s" : ""} en attente</span>` : ""}</span>` : ""}</span>
       <span class="mplace ${x.lieu === LIEU_ATELIER ? "atelier" : ""}">${esc(x.lieu)}</span>
-    </div>`;
+    </div></div>`;
   }
 
   function renderMoules() {
@@ -1010,6 +1034,31 @@
     };
   }
 
+  // Suppression d'un moule (glisser vers la gauche)
+  function confirmDeleteMoule(x) {
+    const fromOrders = state.rows.some((r) => r.key === x.key);
+    openSheet(`
+      <h3>Supprimer ce moule ?</h3>
+      <p class="muted" style="margin:6px 0 16px">${esc(x.model)} · ${esc(x.lieu)}${x.echelle ? " · " + x.echelle : ""}<br>
+      ${fromOrders ? "Il disparaît de la liste des moules. Les commandes ne sont pas touchées. Tu pourras le remettre avec le bouton +." : "Il est retiré de la feuille Moules."}</p>
+      <div class="btns two">
+        <button class="btn ghost" data-act="cancel">Annuler</button>
+        <button class="btn danger" data-act="del">${icon("trash")}Supprimer</button>
+      </div>`);
+    $("#sheetBody").onclick = async (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return closeSheet();
+      if (act !== "del") return;
+      try {
+        // moule lié aux commandes : on le masque (sinon il reviendrait) ; moule ajouté à la main : on efface la ligne
+        if (fromOrders) await saveMoule(x, { etat: "supprime" });
+        else await deleteMoule(x);
+        closeSheet();
+        toast("Moule supprimé");
+      } catch (err) { toast("Échec : " + err.message, true); }
+    };
+  }
+
   // Ajout d'un moule
   function openMouleForm() {
     const models = knownModels();
@@ -1065,6 +1114,12 @@
       const model = clean(f.model.value);
       const same = findMoule(modelKey(model));
       if (same) { toast("Ce moule est déjà dans la liste"); return openMoule(same.key); }
+      const hidden = state.moules.find((x) => x.key === modelKey(model) && x.etat === "supprime");
+      if (hidden) {
+        await writeMoule(hidden.r, [null, MOULE_LABEL[etat], clean(f.note.value), lieu, scale || hidden.scale || scaleFromName(model)], hidden.model);
+        closeSheet();
+        return toast("Moule remis dans la liste");
+      }
       await writeMoule(null, [realName(model), MOULE_LABEL[etat], clean(f.note.value), lieu, scale || scaleFromName(model)]);
       closeSheet();
       toast("Moule ajouté");
@@ -1281,6 +1336,12 @@
       return show("history");
     }
     const act = e.target.closest(".sw-act");
+    if (act && act.dataset.sw === "mdel") {
+      const x = findMoule(act.closest(".swipe").dataset.mswipe);
+      closeSwipe();
+      if (x) confirmDeleteMoule(x);
+      return;
+    }
     if (act) {
       const w = act.closest(".swipe");
       const r = state.rows.find((x) => x.r === Number(w.dataset.swipe));
