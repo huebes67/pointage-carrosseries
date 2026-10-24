@@ -715,14 +715,11 @@
 
   function mouleCard(x, waiting) {
     const w = waiting[x.key] || 0;
-    const toAtelier = x.lieu !== LIEU_ATELIER;
     return `<div class="mcard ${x.etat}" data-moule="${esc(x.key)}" role="button" tabindex="0">
       <span class="mstate">${icon(x.etat === "casse" ? "alert" : x.etat === "sechage" ? "clock" : "check")}</span>
       <span class="mmain"><span class="mname">${esc(x.model)}${x.echelle && x.echelle !== scaleFromName(x.model) ? ` <span class="mscale">${x.echelle}</span>` : ""}</span>${x.note ? `<span class="msub">${esc(x.note)}</span>` : ""}
         ${x.etat !== "ok" || w ? `<span class="mline">${x.etat !== "ok" ? `<span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>` : ""}${w ? `<span class="mwait">${w} cde${w > 1 ? "s" : ""} en attente</span>` : ""}</span>` : ""}</span>
-      <button class="mmove" data-move="${esc(x.key)}" aria-label="${toAtelier ? "Passer à l'atelier" : "Remettre chez Jean"}">
-        ${icon("swap")}<span>${toAtelier ? "Atelier" : "Jean"}</span>
-      </button>
+      <span class="mplace ${x.lieu === LIEU_ATELIER ? "atelier" : ""}">${esc(x.lieu)}</span>
     </div>`;
   }
 
@@ -1298,14 +1295,6 @@
     const w = e.target.closest(".swipe");
     if (w && (Date.now() - (w._swipedAt || 0) < 400)) return; // fin d'un glisser, pas un appui
     if (w && w === swOpen) return closeSwipe();
-    const mv = e.target.closest("[data-move]");
-    if (mv) {
-      const x = findMoule(mv.dataset.move);
-      if (!x) return;
-      const lieu = x.lieu === LIEU_ATELIER ? LIEU_JEAN : LIEU_ATELIER;
-      saveMoule(x, { lieu }).then(() => toast(`${x.model} : ${lieu.toLowerCase()}`)).catch((err) => toast("Échec : " + err.message, true));
-      return;
-    }
     const mo = e.target.closest("[data-moule]");
     if (mo) return openMoule(mo.dataset.moule);
     const el = e.target.closest("[data-row]");
