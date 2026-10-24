@@ -67,8 +67,8 @@
     return k.split(/\s+/).filter((w) => w && !MODEL_STOPWORDS.has(w)).sort().join(" ");
   }
 
-  // Regroupements faits à la main dans l'appli : gardés sur cet appareil, le tableau n'est jamais modifié.
-  // pc_groups = [{ name: "Nom final", members: [{ key: clé de base, label: nom affiché }] }]
+  // Regroupements de doublons faits dans l'appli : partagés via la feuille "Regroupements",
+  // les commandes ne sont jamais modifiées. pc_groups (copie locale) = [{ name, members: [{ key, label }] }]
   let userGroupOf = {}, userGroupName = {};
   function loadUserGroups() {
     userGroupOf = {}; userGroupName = {};
@@ -505,6 +505,7 @@
     try {
       const res = await api.load();
       state.syncedAt = Date.now();
+      syncGroups(res.groups);
       buildRows(res.values);
       buildMoules(res.moules);
       repairScales();
@@ -1127,6 +1128,21 @@
   }
 
   // ---------- Outil de regroupement des modèles ----------
+  // Regroupements reçus du tableau ; la 1re fois, ceux faits avant le partage sont envoyés
+  function syncGroups(remote) {
+    if (!Array.isArray(remote)) return; // ancien script : on garde la copie locale
+    const local = LS.get("pc_groups", []);
+    if (!remote.length && local.length && !LS.get("pc_groupsShared", false)) enqueue({ action: "groups", groups: local });
+    else LS.set("pc_groups", remote);
+    LS.set("pc_groupsShared", true);
+    loadUserGroups();
+  }
+  function setGroups(groups) {
+    LS.set("pc_groups", groups);
+    if (state.source === "sheet") enqueue({ action: "groups", groups });
+    applyGroups();
+  }
+
   function applyGroups() {
     loadUserGroups();
     buildRows(state.matrix);
@@ -1146,7 +1162,7 @@
     openSheet(`
       <h3>Regrouper des modèles</h3>
       <p class="muted" style="margin:4px 0 12px">Coche les modèles qui sont en fait le même, puis choisis le nom à garder.
-      Le tableau n'est jamais modifié : les regroupements sont gardés sur cet appareil.</p>
+      Les commandes ne sont jamais modifiées. Les regroupements sont partagés avec tous les appareils.</p>
       <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <input id="gSearch" type="search" placeholder="Chercher un modèle…" autocomplete="off"></div>
       <div id="gBar" class="gbar"></div>
@@ -1202,9 +1218,8 @@
       }
       groups = groups.filter((x) => fold(x.name) !== fold(name));
       groups.push({ name, members });
-      LS.set("pc_groups", groups);
       sel.clear(); naming = false;
-      applyGroups();
+      setGroups(groups);
       toast(`Regroupé sous « ${name} »`);
       render();
     };
@@ -1219,8 +1234,7 @@
       if (un) {
         const groups = LS.get("pc_groups", []);
         const g = groups.splice(Number(un.dataset.gundo), 1)[0];
-        LS.set("pc_groups", groups);
-        applyGroups(); render();
+        setGroups(groups); render();
         return toast(`« ${g.name} » défait`);
       }
       const act = e.target.closest("[data-gact]")?.dataset.gact;
