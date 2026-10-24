@@ -60,11 +60,39 @@
     "1/8 ancien truggy": "Truggy 1/8 ancien", "1/10 porsche": "Porsche 1/10",
     "maxx v1": "Maxx v1", "cox gold": "Cox gold",
   };
-  function modelKey(s) {
+  function baseKey(s) {
     let k = fold(s);
     for (const [re, to] of MODEL_ALIASES) k = k.replace(re, to);
     // l'ordre des mots ne compte pas : "chargeur dodge" = "dodge chargeur"
     return k.split(/\s+/).filter((w) => w && !MODEL_STOPWORDS.has(w)).sort().join(" ");
+  }
+
+  // Regroupements faits à la main dans l'appli : gardés sur cet appareil, le tableau n'est jamais modifié.
+  // pc_groups = [{ name: "Nom final", members: [{ key: clé de base, label: nom affiché }] }]
+  let userGroupOf = {}, userGroupName = {};
+  function loadUserGroups() {
+    userGroupOf = {}; userGroupName = {};
+    for (const g of LS.get("pc_groups", [])) {
+      userGroupName["ug:" + fold(g.name)] = g.name;
+      userGroupOf[baseKey(g.name)] = g; // un moule enregistré sous le nom du regroupement s'y rattache aussi
+      for (const m of g.members) userGroupOf[m.key] = g;
+    }
+  }
+  loadUserGroups();
+  // Nom écrit dans le tableau : l'écriture réelle la plus utilisée du modèle, jamais un nom de regroupement inventé
+  function realName(name) {
+    const k = modelKey(name);
+    if (!k.startsWith("ug:")) return name;
+    const c = {};
+    for (const r of state.rows) if (r.key === k) c[r.model] = (c[r.model] || 0) + 1;
+    for (const m of state.moules) if (m.key === k) c[m.model] = (c[m.model] || 0) + 0.5;
+    const best = Object.entries(c).sort((a, b) => b[1] - a[1])[0];
+    return best ? best[0] : name;
+  }
+  function modelKey(s) {
+    const k = baseKey(s);
+    const g = userGroupOf[k];
+    return g ? "ug:" + fold(g.name) : k;
   }
 
   const COLORS = {
@@ -108,6 +136,7 @@
     alert: '<path d="M12 3.5L21.5 20h-19z"/><path d="M12 10v4.5M12 17.2v.3"/>',
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     mold: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5L12 12l8-4.5M12 12v9"/>',
+    swap: '<path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
   };
   const icon = (name, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -162,7 +191,7 @@
     const display = {};
     for (const k in variants) {
       const best = Object.entries(variants[k]).sort((x, y) => y[1] - x[1])[0][0];
-      display[k] = MODEL_DISPLAY[k] || best.charAt(0).toUpperCase() + best.slice(1);
+      display[k] = userGroupName[k] || MODEL_DISPLAY[k] || best.charAt(0).toUpperCase() + best.slice(1);
     }
     for (const r of rows) r.name = display[r.key];
     state.rows = rows;
@@ -649,26 +678,74 @@
   }
 
   // ---------- Rendu : Moules ----------
+  // Un moule par modèle des commandes (par défaut : OK, chez Jean) + ceux ajoutés à la main.
+  // Seuls les moules modifiés sont écrits dans la feuille "Moules".
+  const LIEU_JEAN = "Chez Jean", LIEU_ATELIER = "À l'atelier";
+  // Seuls les modèles déjà commandés à la mise en place des moules en créent un automatiquement :
+  // un nom tapé librement dans une nouvelle commande n'ajoute pas de moule (on l'ajoute avec le +).
+  const MOULES_DEPUIS = new Date(2026, 9, 24);
+  function allMoules() {
+    const names = {}, auto = new Set();
+    for (const r of state.rows) {
+      names[r.key] = r.name;
+      if (!r.date || r.date <= MOULES_DEPUIS) auto.add(r.key);
+    }
+    const byKey = {};
+    for (const x of state.moules) byKey[x.key] = { ...x, model: names[x.key] || x.model, lieu: x.lieu || LIEU_JEAN };
+    for (const k of auto) if (!byKey[k]) byKey[k] = { r: null, model: names[k], key: k, etat: "ok", note: "", lieu: LIEU_JEAN, virtual: true };
+    return Object.values(byKey);
+  }
+  const findMoule = (key) => allMoules().find((x) => x.key === key);
+
+  // Enregistre un changement (état, note ou lieu) ; crée la ligne si le moule n'est pas encore dans la feuille
+  function saveMoule(x, patch) {
+    if (x.virtual) {
+      return writeMoule(null, [realName(x.model), MOULE_LABEL[patch.etat || x.etat], patch.note ?? x.note, patch.lieu ?? x.lieu]);
+    }
+    return writeMoule(x.r, [null, patch.etat ? MOULE_LABEL[patch.etat] : null, patch.note ?? null, patch.lieu ?? null], x.model);
+  }
+
+  function mouleCard(x, waiting) {
+    const w = waiting[x.key] || 0;
+    const toAtelier = x.lieu !== LIEU_ATELIER;
+    return `<div class="mcard ${x.etat}" data-moule="${esc(x.key)}" role="button" tabindex="0">
+      <span class="mstate">${icon(x.etat === "casse" ? "alert" : x.etat === "sechage" ? "clock" : "check")}</span>
+      <span class="mmain"><span class="mname">${esc(x.model)}</span>${x.note ? `<span class="msub">${esc(x.note)}</span>` : ""}
+        ${x.etat !== "ok" || w ? `<span class="mline">${x.etat !== "ok" ? `<span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>` : ""}${w ? `<span class="mwait">${w} cde${w > 1 ? "s" : ""} en attente</span>` : ""}</span>` : ""}</span>
+      <button class="mmove" data-move="${esc(x.key)}" aria-label="${toAtelier ? "Passer à l'atelier" : "Remettre chez Jean"}">
+        ${icon("swap")}<span>${toAtelier ? "Atelier" : "Jean"}</span>
+      </button>
+    </div>`;
+  }
+
   function renderMoules() {
     const waiting = {};
     for (const r of state.rows) if (!r.done) waiting[r.key] = (waiting[r.key] || 0) + 1;
-    const order = { casse: 0, sechage: 1, ok: 2 };
-    const list = state.moules.slice().sort((a, b) => order[a.etat] - order[b.etat] || a.model.localeCompare(b.model, "fr"));
-    const n = (e) => state.moules.filter((x) => x.etat === e).length;
+    const all = allMoules();
+    const n = (e) => all.filter((x) => x.etat === e).length;
     $("#mouleSummary").innerHTML = `
       <div class="mstat casse"><b>${n("casse")}</b>Cassé${n("casse") > 1 ? "s" : ""}</div>
       <div class="mstat sechage"><b>${n("sechage")}</b>En séchage</div>
       <div class="mstat ok"><b>${n("ok")}</b>OK</div>`;
-    $("#mouleList").innerHTML = list.length ? list.map((x) => {
-      const w = waiting[x.key] || 0;
-      const sub = x.note;
-      const lieu = x.lieu ? `<span class="mlieu">${esc(x.lieu)}</span>` : "";
-      return `<button class="mcard ${x.etat}" data-moule="${x.r}">
-        <span class="mstate">${icon(x.etat === "casse" ? "alert" : x.etat === "sechage" ? "clock" : "check")}</span>
-        <span class="mmain"><span class="mname">${esc(x.model)}</span>${sub ? `<span class="msub">${esc(sub)}</span>` : ""}</span>
-        <span class="mside"><span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>${lieu}${w ? `<span class="mwait">${w} cde${w > 1 ? "s" : ""} en attente</span>` : ""}</span>
-      </button>`;
-    }).join("") : `<div class="empty"><b>Aucun moule enregistré</b>Ajoute tes moules avec le bouton +, puis indique s'ils sont cassés ou en séchage.</div>`;
+    // Recherche : chaque mot tapé doit être le début d'un mot du modèle
+    const terms = fold(state.mq || "").split(/\s+/).filter(Boolean);
+    const list = all.filter((x) => {
+      if (!terms.length) return true;
+      const words = fold(x.model).split(/[\s/.-]+/);
+      return terms.every((t) => words.some((w) => w.startsWith(t)) || fold(x.model).replace(/\s/g, "").startsWith(t));
+    });
+    const order = { casse: 0, sechage: 1, ok: 2 };
+    const sortFn = (a, b) => order[a.etat] - order[b.etat] || (waiting[b.key] || 0) - (waiting[a.key] || 0) || a.model.localeCompare(b.model, "fr");
+    const atelier = list.filter((x) => x.lieu === LIEU_ATELIER).sort(sortFn);
+    const jean = list.filter((x) => x.lieu !== LIEU_ATELIER).sort(sortFn);
+    const jeanFirst = LS.get("pc_mouleOrder", "atelier") === "jean";
+    $("#mouleOrder").classList.toggle("recent", jeanFirst);
+    const section = (title, items) => `
+      <div class="msect"><h2>${title}</h2><span class="mcount">${items.length}</span></div>
+      <div class="mlist">${items.length ? items.map((x) => mouleCard(x, waiting)).join("") : `<div class="mempty">Aucun moule${terms.length ? " trouvé" : ""}</div>`}</div>`;
+    const parts = [section("À l'atelier", atelier), section("Chez Jean", jean)];
+    if (jeanFirst) parts.reverse();
+    $("#mouleList").innerHTML = parts.join("");
   }
 
   // ---------- Navigation ----------
@@ -764,6 +841,9 @@
   function knownModels() {
     const c = {}; const from = addDays(today(), -365);
     for (const x of state.rows) c[x.name] = (c[x.name] || 0) + (x.date && x.date > from ? 2 : 1);
+    // modèles qui n'existent encore que comme moule (ajoutés avec le +)
+    const known = new Set(state.rows.map((x) => x.key));
+    for (const m of state.moules) if (!known.has(m.key) && !(m.model in c)) c[m.model] = 0.5;
     return Object.entries(c).sort((a, b) => b[1] - a[1]).map(([name]) => ({ name, words: fold(name).split(/[\s/.-]+/).filter(Boolean) }));
   }
   // "pi fin" -> chaque mot tapé doit être le début d'un mot du modèle
@@ -839,7 +919,7 @@
       const payOn = $("#paySwitch").classList.contains("on");
       // Ancienne commande sans info de paiement : on ne touche pas la colonne si l'interrupteur n'a pas bougé
       const pay = !isNew && !r.pay && payOn ? null : PAY_VALUE[payOn ? "paid" : "unpaid"];
-      const values = [dateChanged ? dateToSerial(date) : null, done, clean(form.model.value), colorVal, clean(form.client.value), clean(form.obs.value), pay];
+      const values = [dateChanged ? dateToSerial(date) : null, done, realName(clean(form.model.value)), colorVal, clean(form.client.value), clean(form.obs.value), pay];
       try {
         await writeRow(isNew ? null : r.r, values, isNew ? null : r.model);
         closeSheet();
@@ -849,9 +929,10 @@
   }
 
   // Fiche d'un moule : changer l'état en un appui
-  function openMoule(rowNum) {
-    const x = state.moules.find((m) => m.r === rowNum);
+  function openMoule(key) {
+    const x = findMoule(key);
     if (!x) return;
+    const inOrders = state.rows.some((r) => r.key === x.key);
     const w = state.rows.filter((r) => !r.done && r.key === x.key).length;
     openSheet(`
       <div class="detail-head">
@@ -874,34 +955,33 @@
         <textarea id="mNote" placeholder="Ex : fissure côté capot, 2e moule en cours…">${esc(x.note)}</textarea>
         <button data-act="note">OK</button>
       </div>
-      <button class="btn ghost danger-text" data-act="del" style="width:100%">${icon("trash")}Supprimer ce moule</button>`);
+      ${x.virtual ? "" : `<button class="btn ghost danger-text" data-act="del" style="width:100%">${icon(inOrders ? "undo" : "trash")}${inOrders ? "Remettre par défaut (OK, chez Jean)" : "Supprimer ce moule"}</button>`}`);
 
-    const save = async (values, msg) => {
-      try { await writeMoule(x.r, values, x.model); toast(msg); openMoule(x.r); }
+    const save = async (p, msg) => {
+      try { await saveMoule(x, p); toast(msg); openMoule(x.key); }
       catch (err) { toast("Échec : " + err.message, true); }
     };
     $("#sheetBody").onclick = async (e) => {
       const li = e.target.closest("[data-lieu]");
       if (li) {
-        // Même lieu touché une 2e fois = on l'enlève
-        const lieu = li.dataset.lieu === x.lieu ? "" : li.dataset.lieu;
-        return save([null, null, null, lieu], lieu ? lieu : "Lieu enlevé");
+        if (li.dataset.lieu === x.lieu) return;
+        return save({ lieu: li.dataset.lieu }, li.dataset.lieu);
       }
       const b = e.target.closest("[data-etat]");
       if (b) {
         const etat = b.dataset.etat;
         if (etat === x.etat) return;
-        return save([null, MOULE_LABEL[etat], null, null], etat === "ok" ? "Moule OK" : etat === "casse" ? "Moule cassé" : "Moule en séchage");
+        return save({ etat }, etat === "ok" ? "Moule OK" : etat === "casse" ? "Moule cassé" : "Moule en séchage");
       }
       const act = e.target.closest("[data-act]")?.dataset.act;
-      if (act === "note") return save([null, null, clean($("#mNote").value), null], "Note enregistrée");
+      if (act === "note") return save({ note: clean($("#mNote").value) }, "Note enregistrée");
       if (act === "del") {
         if (!e.target.closest("[data-act]").classList.contains("confirm")) {
           const btn = e.target.closest("[data-act]");
           btn.classList.add("confirm"); btn.innerHTML = `${icon("trash")}Appuie encore pour confirmer`;
           return;
         }
-        await deleteMoule(x); closeSheet(); toast("Moule supprimé");
+        await deleteMoule(x); closeSheet(); toast(inOrders ? "Moule remis par défaut" : "Moule supprimé");
       }
     };
   }
@@ -909,7 +989,7 @@
   // Ajout d'un moule
   function openMouleForm() {
     const models = knownModels();
-    let etat = "casse", lieu = "";
+    let etat = "ok", lieu = LIEU_JEAN;
     openSheet(`
       <h3>Nouveau moule</h3>
       <form class="form" id="mouleForm" autocomplete="off">
@@ -919,13 +999,13 @@
         </div>
         <div class="field"><label>État</label>
           <div class="mchoice">
-            <button type="button" data-etat="ok">${icon("check")}OK</button>
-            <button type="button" data-etat="casse" class="active casse">${icon("alert")}Cassé</button>
+            <button type="button" data-etat="ok" class="active ok">${icon("check")}OK</button>
+            <button type="button" data-etat="casse">${icon("alert")}Cassé</button>
             <button type="button" data-etat="sechage">${icon("clock")}Séchage</button>
           </div>
         </div>
         <div class="field"><label>Où est le moule ?</label>
-          <div class="mchoice lieu">${LIEUX.map((l) => `<button type="button" data-lieu="${esc(l)}">${esc(l)}</button>`).join("")}</div>
+          <div class="mchoice lieu">${LIEUX.map((l) => `<button type="button" data-lieu="${esc(l)}" class="${l === LIEU_JEAN ? "active lieu" : ""}">${esc(l)}</button>`).join("")}</div>
         </div>
         <div class="field"><label>Note</label><textarea name="note" placeholder="Optionnel"></textarea></div>
         <button class="btn primary" type="submit">Ajouter le moule</button>
@@ -937,8 +1017,8 @@
       if (m) { f.model.value = m.dataset.model; $("#mSuggest").innerHTML = ""; return; }
       const li = e.target.closest("[data-lieu]");
       if (li) {
-        lieu = li.dataset.lieu === lieu ? "" : li.dataset.lieu;
-        $$(".mchoice.lieu button", f).forEach((x) => (x.className = x === li && lieu ? "active lieu" : ""));
+        lieu = li.dataset.lieu;
+        $$(".mchoice.lieu button", f).forEach((x) => (x.className = x === li ? "active lieu" : ""));
         return;
       }
       const b = e.target.closest("[data-etat]");
@@ -950,12 +1030,123 @@
     f.onsubmit = async (e) => {
       e.preventDefault();
       const model = clean(f.model.value);
-      const same = state.moules.find((x) => x.key === modelKey(model));
-      if (same) { toast("Ce moule existe déjà"); return openMoule(same.r); }
-      await writeMoule(null, [model, MOULE_LABEL[etat], clean(f.note.value), lieu]);
+      const same = findMoule(modelKey(model));
+      if (same) { toast("Ce moule est déjà dans la liste"); return openMoule(same.key); }
+      await writeMoule(null, [realName(model), MOULE_LABEL[etat], clean(f.note.value), lieu]);
       closeSheet();
       toast("Moule ajouté");
     };
+  }
+
+  // ---------- Outil de regroupement des modèles ----------
+  function applyGroups() {
+    loadUserGroups();
+    buildRows(state.matrix);
+    buildMoules(state.mmatrix);
+    saveCache();
+    renderAll();
+  }
+
+  function openGroupTool() {
+    const sel = new Set();
+    let q = "", naming = false, pickName = "";
+    const entries = () => {
+      const c = {}, names = {};
+      for (const r of state.rows) { c[r.key] = (c[r.key] || 0) + 1; names[r.key] = r.name; }
+      return Object.keys(c).map((key) => ({ key, name: names[key], n: c[key] })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, "fr"));
+    };
+    openSheet(`
+      <h3>Regrouper des modèles</h3>
+      <p class="muted" style="margin:4px 0 12px">Coche les modèles qui sont en fait le même, puis choisis le nom à garder.
+      Le tableau n'est jamais modifié : les regroupements sont gardés sur cet appareil.</p>
+      <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="gSearch" type="search" placeholder="Chercher un modèle…" autocomplete="off"></div>
+      <div id="gBar" class="gbar"></div>
+      <div id="gList" class="glist"></div>
+      <div id="gDone"></div>`);
+
+    const render = () => {
+      const all = entries();
+      const byKey = Object.fromEntries(all.map((e) => [e.key, e]));
+      // Barre : modèles cochés + bouton Regrouper, ou choix du nom final
+      const chosen = [...sel].map((k) => byKey[k]).filter(Boolean);
+      $("#gBar").innerHTML = naming ? `
+        <div class="qlabel">Nom à garder</div>
+        <div class="gnames">${chosen.map((e) => `<button type="button" class="grow ${pickName === e.name ? "on" : ""}" data-gname="${esc(e.name)}">
+          <span class="gbox">${pickName === e.name ? icon("check") : ""}</span><span class="gname">${esc(e.name)}</span><span class="gn">${e.n}</span></button>`).join("")}</div>
+        <div class="btns two" style="margin-top:10px">
+          <button class="btn ghost" data-gact="cancel">Annuler</button>
+          <button class="btn primary" data-gact="save">Regrouper</button>
+        </div>` : chosen.length ? `
+        <div class="gsel">${chosen.map((e) => `<span class="gchip">${esc(e.name)} <b>${e.n}</b></span>`).join("")}</div>
+        <button class="btn primary" data-gact="merge" ${chosen.length < 2 ? "disabled" : ""} style="width:100%">Regrouper ${chosen.length} modèles</button>` : "";
+      // Liste des modèles (recherche : début des mots)
+      const terms = fold(q).split(/\s+/).filter(Boolean);
+      const list = all.filter((e) => !terms.length || terms.every((t) => fold(e.name).split(/[\s/.-]+/).some((w) => w.startsWith(t))));
+      $("#gList").innerHTML = naming ? "" : list.slice(0, 120).map((e) => `
+        <button type="button" class="grow ${sel.has(e.key) ? "on" : ""}" data-gkey="${esc(e.key)}">
+          <span class="gbox">${sel.has(e.key) ? icon("check") : ""}</span>
+          <span class="gname">${esc(e.name)}${e.key.startsWith("ug:") ? ` <span class="gtag">regroupé</span>` : ""}</span>
+          <span class="gn">${e.n}</span>
+        </button>`).join("") + (list.length > 120 ? `<div class="mempty">Affine la recherche pour voir les autres modèles</div>` : "");
+      // Regroupements existants
+      const groups = LS.get("pc_groups", []);
+      $("#gDone").innerHTML = naming || !groups.length ? "" : `
+        <div class="qlabel" style="margin-top:16px">Mes regroupements</div>
+        ${groups.map((g, i) => `<div class="gdone"><div><b>${esc(g.name)}</b><span class="msub">${g.members.map((m) => esc(m.label)).join(" · ")}</span></div>
+          <button class="btn ghost" data-gundo="${i}">${icon("undo")}Défaire</button></div>`).join("")}`;
+    };
+
+    const save = (name) => {
+      name = clean(name);
+      if (!name) return toast("Choisis un nom", true);
+      let groups = LS.get("pc_groups", []);
+      const members = [];
+      for (const k of sel) {
+        if (k.startsWith("ug:")) {
+          // un regroupement déjà fait est fusionné dans le nouveau
+          const g = groups.find((x) => "ug:" + fold(x.name) === k);
+          if (g) { members.push(...g.members); groups = groups.filter((x) => x !== g); }
+        } else {
+          const r = state.rows.find((x) => x.key === k);
+          members.push({ key: k, label: r ? r.name : k });
+        }
+      }
+      groups = groups.filter((x) => fold(x.name) !== fold(name));
+      groups.push({ name, members });
+      LS.set("pc_groups", groups);
+      sel.clear(); naming = false;
+      applyGroups();
+      toast(`Regroupé sous « ${name} »`);
+      render();
+    };
+
+    $("#gSearch").oninput = (e) => { q = e.target.value; render(); };
+    $("#sheetBody").onclick = (e) => {
+      const row = e.target.closest("[data-gkey]");
+      if (row) { const k = row.dataset.gkey; sel.has(k) ? sel.delete(k) : sel.add(k); return render(); }
+      const nm = e.target.closest("[data-gname]");
+      if (nm) { pickName = nm.dataset.gname; return render(); }
+      const un = e.target.closest("[data-gundo]");
+      if (un) {
+        const groups = LS.get("pc_groups", []);
+        const g = groups.splice(Number(un.dataset.gundo), 1)[0];
+        LS.set("pc_groups", groups);
+        applyGroups(); render();
+        return toast(`« ${g.name} » défait`);
+      }
+      const act = e.target.closest("[data-gact]")?.dataset.gact;
+      if (act === "merge") {
+        naming = true;
+        // par défaut : le nom le plus utilisé parmi les modèles cochés
+        const e0 = entries().filter((e) => sel.has(e.key))[0];
+        pickName = e0 ? e0.name : "";
+        return render();
+      }
+      if (act === "cancel") { naming = false; return render(); }
+      if (act === "save") return save(pickName);
+    };
+    render();
   }
 
   function openSettings() {
@@ -974,6 +1165,7 @@
         <button class="btn primary" type="submit">Enregistrer</button>
       </form>
       <div class="btns two" style="margin-top:12px">
+        <button class="btn ghost" id="btnGroups" type="button" style="grid-column:1/-1">Regrouper des modèles</button>
         <label class="btn ghost file-btn">Ouvrir un fichier<input type="file" id="fileInput2" accept=".xlsx,.xlsm,.xls"></label>
         ${c.key ? `<button class="btn ghost" id="btnForget">Oublier le code</button>` : `<button class="btn ghost" id="btnCode2">Code d'accès</button>`}
       </div>`);
@@ -994,6 +1186,7 @@
       toast("Réglages enregistrés");
       if (state.source === "sheet") refresh(true);
     };
+    $("#btnGroups").onclick = openGroupTool;
     $("#fileInput2").onchange = (e) => { if (e.target.files[0]) { closeSheet(); openLocalFile(e.target.files[0]); } };
     const fg = $("#btnForget");
     if (fg) fg.onclick = () => { LS.del("pc_key"); LS.del("pc_cache"); LS.del("pc_queue"); location.reload(); };
@@ -1069,8 +1262,16 @@
     const w = e.target.closest(".swipe");
     if (w && (Date.now() - (w._swipedAt || 0) < 400)) return; // fin d'un glisser, pas un appui
     if (w && w === swOpen) return closeSwipe();
+    const mv = e.target.closest("[data-move]");
+    if (mv) {
+      const x = findMoule(mv.dataset.move);
+      if (!x) return;
+      const lieu = x.lieu === LIEU_ATELIER ? LIEU_JEAN : LIEU_ATELIER;
+      saveMoule(x, { lieu }).then(() => toast(`${x.model} : ${lieu.toLowerCase()}`)).catch((err) => toast("Échec : " + err.message, true));
+      return;
+    }
     const mo = e.target.closest("[data-moule]");
-    if (mo) return openMoule(Number(mo.dataset.moule));
+    if (mo) return openMoule(mo.dataset.moule);
     const el = e.target.closest("[data-row]");
     if (el) openDetail(Number(el.dataset.row));
   });
@@ -1086,12 +1287,21 @@
     $$("#topRange button").forEach((c) => c.classList.toggle("active", c === b));
     state.topRange = b.dataset.range; renderStats();
   };
+  let mSearchTimer;
+  $("#mouleSearch").oninput = (e) => { clearTimeout(mSearchTimer); mSearchTimer = setTimeout(() => { state.mq = e.target.value; renderMoules(); }, 120); };
+  $("#mouleOrder").onclick = () => {
+    const next = LS.get("pc_mouleOrder", "atelier") === "jean" ? "atelier" : "jean";
+    LS.set("pc_mouleOrder", next);
+    renderMoules();
+    toast(next === "jean" ? "Chez Jean en haut" : "Atelier en haut");
+  };
   $("#todoSort").onclick = () => {
     const next = LS.get("pc_todoSort", "old") === "new" ? "old" : "new";
     LS.set("pc_todoSort", next);
     renderHome();
     toast(next === "new" ? "Plus récentes en haut" : "Plus anciennes en haut");
   };
+  $("#btnGroupStats").onclick = openGroupTool;
   $("#topCount").onclick = (e) => {
     const b = e.target.closest("[data-count]"); if (!b) return;
     $$("#topCount button").forEach((c) => c.classList.toggle("active", c === b));

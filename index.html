@@ -96,7 +96,16 @@
     <!-- Moules -->
     <section class="view" id="view-moules" hidden>
       <div class="mstats" id="mouleSummary"></div>
-      <div id="mouleList" class="mlist"></div>
+      <div class="mtools">
+        <div class="search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="mouleSearch" type="search" placeholder="Chercher un moule…" autocomplete="off">
+        </div>
+        <button class="sort-btn" id="mouleOrder" aria-label="Inverser Atelier / Chez Jean">
+          <svg viewBox="0 0 24 24"><path class="ar-up" d="M8 20V4M4 8l4-4 4 4"/><path class="ar-down" d="M16 4v16M12 16l4 4 4-4"/></svg>
+        </button>
+      </div>
+      <div id="mouleList"></div>
     </section>
 
     <section class="view" id="view-stats" hidden>
@@ -105,7 +114,7 @@
         <div id="chartMonths"></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>Modèles</h2></div>
+        <div class="panel-head"><h2>Modèles</h2><button class="link-btn" id="btnGroupStats" type="button">Regrouper</button></div>
         <div class="seg-row">
           <div class="seg" id="topRange">
             <button data-range="365" class="active">1 an</button>
