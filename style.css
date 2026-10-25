@@ -609,3 +609,6 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
   font-size: 12.5px; font-weight: 750; color: var(--ok);
 }
 .grp-label .ic { width: 15px; height: 15px; stroke-width: 2.6; }
+
+/* Glisser une fenêtre vers le bas ne doit pas faire défiler la page derrière */
+.sheet { overscroll-behavior: contain; }

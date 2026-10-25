@@ -820,6 +820,48 @@
   function closeSheet() { $("#sheet").hidden = true; $("#sheetBackdrop").hidden = true; }
   const sheetOpen = () => !$("#sheet").hidden;
 
+  // Fermer une fenêtre en la glissant vers le bas (téléphone ; sur PC elle est centrée)
+  (function sheetSwipeDown() {
+    const el = $("#sheet"), bd = $("#sheetBackdrop");
+    let y0 = null, dy = 0, t0 = 0, dragging = false;
+    const reset = () => { el.style.transform = ""; el.style.transition = ""; bd.style.opacity = ""; };
+    el.addEventListener("touchstart", (e) => {
+      y0 = null;
+      if (innerWidth >= 900 || e.touches.length !== 1 || el.scrollTop > 0) return;
+      y0 = e.touches[0].clientY; dy = 0; t0 = Date.now(); dragging = false;
+    }, { passive: true });
+    el.addEventListener("touchmove", (e) => {
+      if (y0 === null) return;
+      dy = e.touches[0].clientY - y0;
+      if (!dragging) {
+        if (dy > 8 && el.scrollTop <= 0) dragging = true;
+        else { if (dy < -8) y0 = null; return; }
+      }
+      e.preventDefault();
+      if (document.activeElement && document.activeElement.blur && el.contains(document.activeElement)) document.activeElement.blur();
+      el.style.transition = "none";
+      el.style.transform = `translateY(${Math.max(0, dy)}px)`;
+      bd.style.opacity = String(Math.max(0.2, 1 - dy / 400));
+    }, { passive: false });
+    const end = () => {
+      if (y0 === null) return;
+      y0 = null;
+      if (!dragging) return;
+      const fast = dy / Math.max(1, Date.now() - t0) > 0.6;
+      el.style.transition = "transform .2s ease";
+      if (dy > 110 || (fast && dy > 40)) {
+        el.style.transform = "translateY(100%)";
+        setTimeout(() => { closeSheet(); reset(); }, 190);
+      } else {
+        el.style.transform = "";
+        bd.style.opacity = "";
+        setTimeout(reset, 210);
+      }
+    };
+    el.addEventListener("touchend", end);
+    el.addEventListener("touchcancel", end);
+  })();
+
   // Fiche d'actions rapides : un appui = une modification enregistrée
   function openDetail(rowNum) {
     const r = state.rows.find((x) => x.r === rowNum);
