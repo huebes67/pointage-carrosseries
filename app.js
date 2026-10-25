@@ -856,7 +856,10 @@
         <div class="cell"><div class="k">Échéance (${cfg().delai} j)</div><div class="v">${r.date ? fmt(addDays(r.date, cfg().delai)) : "—"}</div></div>
         ${r.obs ? `<div class="cell full"><div class="k">Observations</div><div class="v">${esc(r.obs)}</div></div>` : ""}
       </div>
-      <button class="btn ghost" data-act="edit" style="width:100%">Tout modifier (date, modèle, observations…)</button>`);
+      <div class="btns">
+        <button class="btn ghost" data-act="addto">${icon("plus")}Ajouter un modèle à cette commande</button>
+        <button class="btn ghost" data-act="edit">Tout modifier (date, modèle, observations…)</button>
+      </div>`);
 
     const save = async (values, msg, close) => {
       $$("#sheetBody button").forEach((b) => (b.disabled = true));
@@ -879,6 +882,7 @@
       }
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "edit") return openForm(r);
+      if (act === "addto") return openForm(null, r);
       if (act === "done") return save([null, r.done ? "" : "F", null, null, null, null, null], r.done ? "Remise en cours" : `${r.name} fabriquée`, !r.done);
       if (act === "pay") return save([null, null, null, null, null, null, PAY_VALUE[r.pay === "paid" ? "unpaid" : "paid"]], r.pay === "paid" ? "Non payée" : "Payée");
       if (act === "note") return save([null, null, null, null, clean($("#qNote").value), null, null], "Note enregistrée");
@@ -905,18 +909,19 @@
   }
   const suggestHtml = (list) => list.map((m) => `<button type="button" data-model="${esc(m.name)}">${esc(m.name)}</button>`).join("");
 
-  function openForm(r) {
+  // base = commande existante à laquelle on ajoute un modèle (même client, même date, même paiement)
+  function openForm(r, base) {
     const isNew = !r;
     const models = knownModels();
     const suggestModels = (q) => suggestFrom(models, q);
     const curColor = r ? r.color : "Noir";
     const isOther = r && r.color && !COLOR_CHOICES.includes(r.color);
     openSheet(`
-      <h3>${isNew ? "Nouvelle commande" : "Modifier la commande"}</h3>
-      <p class="muted" style="margin:0 0 14px">${isNew ? `Ajoutée à la ligne ${state.lastUsedRow + 1} du fichier` : `Ligne ${r.r} du fichier`}</p>
+      <h3>${base ? "Ajouter à la commande" : isNew ? "Nouvelle commande" : "Modifier la commande"}</h3>
+      <p class="muted" style="margin:0 0 14px">${base ? `Commande ${base.client ? "de " + esc(base.client) + " " : ""}du ${fmt(base.date)} · même date pour que tout parte ensemble` : isNew ? `Ajoutée à la ligne ${state.lastUsedRow + 1} du fichier` : `Ligne ${r.r} du fichier`}</p>
       <form class="form" id="orderForm" autocomplete="off">
         <div class="field"><label>Date de commande</label>
-          <input type="date" name="date" value="${isoDate(r ? r.date || today() : today())}" required></div>
+          <input type="date" name="date" value="${isoDate(r ? r.date || today() : base && base.date ? base.date : today())}" required></div>
         <div class="field"><label>Modèle</label>
           <input name="model" placeholder="Tape les premières lettres : pi, max, cox…" value="${esc(r ? r.model : "")}" required autocomplete="off" autocapitalize="sentences">
           <div class="suggest" id="modelSuggest">${isNew ? suggestHtml(suggestModels("")) : ""}</div>
@@ -932,10 +937,10 @@
         ${isNew ? `<div id="extraLines"></div>
         <button type="button" class="btn ghost" id="addLine">${icon("plus")}Ajouter un autre modèle</button>` : ""}
         <div class="field"><label>Client / note</label>
-          <input name="client" placeholder="Ex : Julien mail" value="${esc(r ? r.client : "")}"></div>
+          <input name="client" placeholder="Ex : Julien mail" value="${esc(r ? r.client : base ? base.client : "")}"></div>
         <div class="field"><label>Observations</label>
           <textarea name="obs" placeholder="Optionnel">${esc(r ? r.obs : "")}</textarea></div>
-        <div class="switch-row"><span>Payée</span><button type="button" class="switch ${!r || r.pay !== "unpaid" ? "on" : ""}" id="paySwitch" aria-label="Payée"></button></div>
+        <div class="switch-row"><span>Payée</span><button type="button" class="switch ${(r || base) && (r || base).pay === "unpaid" ? "" : "on"}" id="paySwitch" aria-label="Payée"></button></div>
         <div class="switch-row"><span>Déjà fabriquée</span><button type="button" class="switch ${r && r.done ? "on" : ""}" id="doneSwitch" aria-label="Déjà fabriquée"></button></div>
         <button class="btn primary" type="submit">${isNew ? "Ajouter la commande" : "Enregistrer"}</button>
       </form>`);
