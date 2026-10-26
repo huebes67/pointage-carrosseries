@@ -41,6 +41,9 @@
       </div>
     </div>
     <div class="top-actions">
+      <button class="icon-btn" id="btnTv" aria-label="Mode TV (écran de l'atelier)" title="Mode TV">
+        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      </button>
       <button class="icon-btn" id="btnRefresh" aria-label="Actualiser">
         <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
       </button>
@@ -179,6 +182,28 @@
     <div id="sheetBody"></div>
   </div>
 
+  <!-- Mode TV : écran de l'atelier -->
+  <div id="tv" hidden>
+    <div class="tv-head">
+      <img class="logo" src="logo.png" alt="">
+      <div class="tv-title">À fabriquer <b id="tvCount">0</b><span class="tv-late" id="tvLate" hidden></span></div>
+      <div class="tv-right"><span class="tv-sync" id="tvSync"></span><span class="tv-clock" id="tvClock"></span>
+        <button class="icon-btn" id="tvClose" aria-label="Quitter le Mode TV"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+    </div>
+    <div class="recap tv-recap" id="tvRecap"></div>
+    <div class="tv-grid" id="tvGrid"></div>
+  </div>
+
+  <!-- Jumelage d'une télé (sans taper le code d'accès) -->
+  <div id="tvPair" hidden>
+    <img class="logo big" src="logo.png" alt="">
+    <h1>Connecter cette télé</h1>
+    <p>Sur ton téléphone : ouvre l'appli → <b>Réglages</b> → <b>Connecter une télé</b>, puis tape ce code :</p>
+    <div class="tvpair-code" id="tvPairCode">······</div>
+    <p class="muted" id="tvPairMsg"></p>
+  </div>
+
   <div class="toast" id="toast" hidden></div>
 
   <!-- Écran de démarrage -->
@@ -188,6 +213,7 @@
       <h1>Pointage Carrosseries</h1>
       <p>Elsass Body RC · ton tableau de fabrication, dans ta poche.</p>
       <button class="btn primary" id="btnCode">Entrer le code d'accès</button>
+      <button class="btn ghost" id="btnTvPair">C'est la télé de l'atelier</button>
       <label class="btn ghost file-btn">
         Ouvrir un fichier Excel du téléphone
         <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">

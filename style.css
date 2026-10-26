@@ -631,3 +631,45 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .rc .swatch { width: 10px; height: 10px; }
 /* Taille de table sous le nom du moule */
 .mline .mscale { margin-left: 0; vertical-align: 0; }
+
+/* ---------- Mode TV : écran de l'atelier (lisible de loin) ---------- */
+#tv { position: fixed; inset: 0; z-index: 200; background: var(--bg); display: flex; flex-direction: column;
+  padding: clamp(12px, 1.6vw, 36px); gap: clamp(8px, 1vw, 22px); font-size: clamp(14px, 1.15vw, 30px); }
+#tv[hidden] { display: none; }
+body.tv-on { overflow: hidden; }
+.tv-head { display: flex; align-items: center; gap: clamp(10px, 1.2vw, 28px); }
+.tv-head .logo { width: clamp(44px, 4vw, 96px); height: clamp(44px, 4vw, 96px); }
+.tv-title { flex: 1; font-size: 2em; font-weight: 800; display: flex; align-items: baseline; gap: .4em; flex-wrap: wrap; }
+.tv-title b { color: var(--accent); font-size: 1.25em; }
+.tv-late { font-size: .55em; font-weight: 800; color: #fff; background: var(--late); padding: .2em .7em; border-radius: 999px; align-self: center; }
+.tv-right { display: flex; align-items: center; gap: 1em; }
+.tv-sync { color: var(--muted); font-size: .85em; }
+.tv-clock { font-size: 1.8em; font-weight: 800; font-variant-numeric: tabular-nums; }
+#tvClose { opacity: .45; }
+#tvClose:hover, #tvClose:focus { opacity: 1; }
+.tv-recap { margin: 0; flex-wrap: wrap; overflow: visible; font-size: .95em; }
+.tv-recap .rc-g { font-size: 1em; padding: .4em .8em; border-radius: .7em; }
+.tv-recap .rc .swatch { width: .8em; height: .8em; }
+.tv-grid { flex: 1; min-height: 0; overflow: hidden; display: grid; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(clamp(240px, 21vw, 560px), 1fr)); gap: clamp(8px, .9vw, 20px); }
+.tvc { --u: var(--muted); background: var(--card); border: 2px solid var(--u); border-radius: clamp(10px, .9vw, 20px); overflow: hidden; display: flex; flex-direction: column; }
+.tvc.ok { --u: var(--ok); } .tvc.warn { --u: var(--warn); } .tvc.hot { --u: var(--hot); } .tvc.late { --u: var(--late); }
+.tvc .cband { margin: 0; padding: .3em .8em; font-size: .85em; }
+.tvc-body { display: flex; gap: .8em; padding: .7em .9em; align-items: center; flex: 1; }
+.tvc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .35em; }
+.tvc-name { font-size: 1.35em; font-weight: 800; line-height: 1.15; }
+.tvc-main .mscale { margin: 0; font-size: .8em; vertical-align: 0; }
+.tvc-main .mflag { font-size: .8em; }
+.tvc-note { color: var(--muted); font-size: .9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.tvc-cd { text-align: center; color: var(--u); font-size: .8em; font-weight: 700; line-height: 1.1; min-width: 3.6em; }
+.tvc-cd b { display: block; font-size: 2.6em; font-weight: 850; }
+.tv-empty { grid-column: 1 / -1; text-align: center; font-size: 2.4em; font-weight: 800; color: var(--ok); padding: 2em 0; }
+
+/* Jumelage d'une télé */
+#tvPair { position: fixed; inset: 0; z-index: 210; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 4vw; font-size: clamp(16px, 1.6vw, 40px); }
+#tvPair[hidden] { display: none; }
+#tvPair h1 { font-size: 2em; margin: .2em 0 .4em; }
+#tvPair p { max-width: 34em; margin: .3em 0; line-height: 1.4; }
+#tvPair .logo.big { width: 8em; height: 8em; }
+.tvpair-code { font-size: 4.5em; font-weight: 850; letter-spacing: .12em; color: var(--accent); margin: .3em 0; font-variant-numeric: tabular-nums; }
+#tv .icon-btn[hidden] { display: none; }

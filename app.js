@@ -299,7 +299,7 @@
       if (!res.ok) { const err = new Error("Serveur Google indisponible (" + res.status + ")"); err.network = true; throw err; }
       let j;
       try { j = await res.json(); } catch { throw new Error("Réponse inattendue : vérifie l'adresse du script"); }
-      if (!j.ok) { const err = new Error(j.error || "Erreur"); err.auth = /code/i.test(j.error || ""); throw err; }
+      if (!j.ok) { const err = new Error(j.error || "Erreur"); err.auth = /code d.acc/i.test(j.error || ""); throw err; }
       return j;
     },
     async load() { return this.call({ action: "read" }); },
@@ -529,7 +529,12 @@
     } catch (e) {
       console.error(e);
       banner("Impossible de lire le tableau : " + e.message, true);
-      if (e.auth) { LS.del("pc_key"); LS.del("pc_cache"); askCode(e.message); }
+      if (e.auth) {
+        LS.del("pc_key"); LS.del("pc_cache");
+        // télé déconnectée depuis un téléphone : on réaffiche un code de jumelage
+        if (isTvDevice()) { LS.del("pc_tv"); closeTv(true); startTvPairing(); }
+        else askCode(e.message);
+      }
       return false;
     } finally {
       btn.classList.remove("spin");
@@ -597,7 +602,7 @@
   }
 
   // Barre récap des carrosseries à faire : échelle · couleur · nombre
-  function renderRecap(todo) {
+  function renderRecap(todo, el = "#todoRecap") {
     const scaleOf = {};
     for (const x of allMoules()) scaleOf[x.key] = x.echelle;
     const by = {};
@@ -607,12 +612,154 @@
       ((by[s] ||= {})[c] = (by[s][c] || 0) + 1);
     }
     const rank = (s) => (s ? ECHELLES.indexOf(s) : 99);
-    $("#todoRecap").hidden = !todo.length;
-    $("#todoRecap").innerHTML = Object.keys(by).sort((a, b) => rank(a) - rank(b)).map((s) => {
+    $(el).hidden = !todo.length;
+    $(el).innerHTML = Object.keys(by).sort((a, b) => rank(a) - rank(b)).map((s) => {
       const cols = Object.entries(by[s]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "fr"));
       return `<div class="rc-g"><b>${s || "Sans taille"}</b>${cols.map(([c, n]) =>
         `<span class="rc">${c ? swatch(c) : ""}${esc(c || "Sans couleur")}<em>${n}</em></span>`).join("")}</div>`;
     }).join("");
+  }
+
+  // ---------- Mode TV : écran de l'atelier (lecture seule, grand format) ----------
+  // Ouvert sur le navigateur d'une télé connectée (adresse …/#tv) ou casté depuis un téléphone / PC.
+  const tv = { on: false, timers: [], lock: null };
+  function renderTv() {
+    if (!tv.on) return;
+    const todo = state.rows.filter((r) => !r.done).map((r) => ({ r, u: urgency(r) }));
+    todo.sort((a, b) => (!a.r.date || !b.r.date) ? (a.r.date ? 0 : 1) - (b.r.date ? 0 : 1) || a.r.r - b.r.r : (a.r.date - b.r.date) || (a.r.r - b.r.r));
+    const late = todo.filter((x) => x.u.cls === "late").length;
+    const scaleOf = {};
+    for (const x of allMoules()) scaleOf[x.key] = x.echelle;
+    $("#tvCount").textContent = todo.length;
+    $("#tvLate").textContent = late ? `${late} en retard` : "";
+    $("#tvLate").hidden = !late;
+    $("#tvSync").textContent = state.syncedAt ? "Mis à jour à " + new Date(state.syncedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
+    renderRecap(todo.map((x) => x.r), "#tvRecap");
+    $("#tvGrid").innerHTML = todo.length ? todo.map(({ r, u }) => {
+      let n, lbl;
+      if (u.cls === "unknown") { n = "?"; lbl = "sans date"; }
+      else if (u.left < 0) { n = "+" + -u.left; lbl = "retard"; }
+      else if (u.left === 0) { n = "0"; lbl = "dernier jour"; }
+      else { n = u.left; lbl = u.left > 1 ? "jours" : "jour"; }
+      const s = scaleOf[r.key] || scaleFromName(r.model);
+      return `<div class="tvc ${u.cls}">
+        ${colorBand(r.color)}
+        <div class="tvc-body">
+          <div class="tvc-main">
+            <div class="tvc-name">${esc(r.name)}</div>
+            ${s ? `<span class="mscale">Table ${s}</span>` : ""}${mouleFlag(r.key)}
+            ${r.client || r.obs ? `<div class="tvc-note">${esc([r.client, r.obs].filter(Boolean).join(" · "))}</div>` : ""}
+          </div>
+          <div class="tvc-cd"><b>${n}</b>${lbl}</div>
+        </div>
+      </div>`;
+    }).join("") : `<div class="tv-empty">Tout est fabriqué</div>`;
+  }
+  function tvClock() { $("#tvClock").textContent = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); }
+  async function tvWake() {
+    try { if (tv.on && "wakeLock" in navigator && document.visibilityState === "visible") tv.lock = await navigator.wakeLock.request("screen"); } catch {}
+  }
+  // Défilement lent quand toutes les tuiles ne tiennent pas sur l'écran (pause en haut et en bas)
+  function tvScroll() {
+    const g = $("#tvGrid");
+    let pause = 120;
+    return setInterval(() => {
+      if (pause-- > 0 || g.scrollHeight <= g.clientHeight + 4) return;
+      if (g.scrollTop + g.clientHeight >= g.scrollHeight - 2) { pause = 120; setTimeout(() => (g.scrollTop = 0), 3000); return; }
+      g.scrollTop += 1;
+    }, 40);
+  }
+  function openTv() {
+    if (tv.on) return;
+    tv.on = true;
+    closeSheet();
+    $("#tv").hidden = false;
+    document.body.classList.add("tv-on");
+    if (location.hash !== "#tv") history.replaceState(null, "", "#tv");
+    $("#tvClose").hidden = isTvDevice();
+    try { document.documentElement.requestFullscreen?.().catch(() => {}); } catch {}
+    tvWake();
+    tvClock();
+    renderTv();
+    $("#tvGrid").scrollTop = 0;
+    tv.timers = [setInterval(() => refresh(true), 60000), setInterval(tvClock, 15000), tvScroll()];
+    refresh(true);
+  }
+  // Télé jumelée : elle reste en Mode TV (son code ne permet que de lire)
+  const isTvDevice = () => !!LS.get("pc_tv", false);
+  function closeTv(force) {
+    if (!tv.on || (isTvDevice() && force !== true)) return;
+    tv.on = false;
+    tv.timers.forEach(clearInterval);
+    try { tv.lock && tv.lock.release(); } catch {}
+    tv.lock = null;
+    $("#tv").hidden = true;
+    document.body.classList.remove("tv-on");
+    history.replaceState(null, "", location.pathname + location.search);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+
+  // Jumelage : la télé affiche un code à 6 chiffres, on le tape sur un téléphone déjà connecté
+  // (Réglages > Connecter une télé). Plus besoin de taper le code d'accès avec la télécommande.
+  let pairTimer = null;
+  async function startTvPairing() {
+    clearTimeout(pairTimer);
+    $("#welcome").hidden = true;
+    closeSheet();
+    const box = $("#tvPair");
+    box.hidden = false;
+    if (location.hash !== "#tv") history.replaceState(null, "", "#tv");
+    $("#tvPairCode").textContent = "······";
+    $("#tvPairMsg").textContent = "Préparation…";
+    let p;
+    try { p = await api.call({ action: "pairStart" }); }
+    catch (e) { $("#tvPairMsg").textContent = "Impossible de joindre le tableau (" + e.message + "). Nouvel essai dans 15 s…"; pairTimer = setTimeout(startTvPairing, 15000); return; }
+    $("#tvPairCode").textContent = p.code.slice(0, 3) + " " + p.code.slice(3);
+    $("#tvPairMsg").textContent = "Le code change toutes les 10 minutes.";
+    const t0 = Date.now();
+    const poll = async () => {
+      if (Date.now() - t0 > 9.5 * 60000) return startTvPairing();
+      try {
+        const r = await api.call({ action: "pairPoll", token: p.token });
+        if (r.key) {
+          LS.set("pc_key", r.key); LS.set("pc_tv", true);
+          box.hidden = true;
+          state.source = "sheet";
+          return openTv();
+        }
+      } catch (e) { if (!e.network) return startTvPairing(); }
+      pairTimer = setTimeout(poll, 3000);
+    };
+    pairTimer = setTimeout(poll, 3000);
+  }
+
+  // Sur le téléphone : taper le code affiché par la télé
+  function openTvConnect() {
+    openSheet(`
+      <h3>Connecter une télé</h3>
+      <p class="muted" style="margin:0 0 14px">Sur la télé, ouvre le navigateur à l'adresse de l'appli et choisis « C'est la télé de l'atelier ». Tape ici le code à 6 chiffres affiché. La télé pourra seulement afficher les commandes, pas les modifier.</p>
+      <form class="form" id="tvForm" autocomplete="off">
+        <div class="field"><label>Code affiché sur la télé</label>
+          <input name="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" placeholder="123 456" required style="font-size:24px;letter-spacing:4px;text-align:center"></div>
+        <button class="btn primary" type="submit">Connecter la télé</button>
+      </form>
+      <button class="btn ghost danger-text" id="btnTvReset" style="width:100%;margin-top:12px">Déconnecter toutes les télés</button>`);
+    const f = $("#tvForm");
+    setTimeout(() => f.code.focus(), 250);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const code = f.code.value.replace(/\D/g, "");
+      if (code.length !== 6) return toast("Le code fait 6 chiffres", true);
+      const btn = f.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Connexion…";
+      try { await api.call({ action: "pair", code }); closeSheet(); toastOk("Télé connectée"); }
+      catch (err) { btn.disabled = false; btn.textContent = "Connecter la télé"; toast(err.message, true); }
+    };
+    $("#btnTvReset").onclick = async (e) => {
+      const b = e.currentTarget;
+      if (!b.classList.contains("confirm")) { b.classList.add("confirm"); b.textContent = "Appuie encore pour confirmer"; return; }
+      try { await api.call({ action: "tvReset" }); closeSheet(); toast("Télés déconnectées"); }
+      catch (err) { toast("Échec : " + err.message, true); }
+    };
   }
 
   // Commande groupée = même client, même date, au moins 2 carrosseries
@@ -753,6 +900,7 @@
     if (state.view === "history") filterHistory();
     if (state.view === "stats") renderStats();
     if (state.view === "moules") renderMoules();
+    renderTv();
   }
 
   // ---------- Rendu : Moules ----------
@@ -1437,6 +1585,7 @@
       </form>
       <div class="btns two" style="margin-top:12px">
         <button class="btn ghost" id="btnGroups" type="button" style="grid-column:1/-1">Regrouper des modèles</button>
+        ${c.key && !isTvDevice() ? `<button class="btn ghost" id="btnTvConnect" type="button" style="grid-column:1/-1">Connecter une télé</button>` : ""}
         <label class="btn ghost file-btn">Ouvrir un fichier<input type="file" id="fileInput2" accept=".xlsx,.xlsm,.xls"></label>
         ${c.key ? `<button class="btn ghost" id="btnForget">Oublier le code</button>` : `<button class="btn ghost" id="btnCode2">Code d'accès</button>`}
       </div>`);
@@ -1458,6 +1607,7 @@
       if (state.source === "sheet") refresh(true);
     };
     $("#btnGroups").onclick = openGroupTool;
+    const tc = $("#btnTvConnect"); if (tc) tc.onclick = openTvConnect;
     $("#fileInput2").onchange = (e) => { if (e.target.files[0]) { closeSheet(); openLocalFile(e.target.files[0]); } };
     const fg = $("#btnForget");
     if (fg) fg.onclick = () => { LS.del("pc_key"); LS.del("pc_cache"); LS.del("pc_queue"); location.reload(); };
@@ -1610,6 +1760,10 @@
     toast(next === "new" ? "Plus récentes en haut" : "Plus anciennes en haut");
   };
   $("#btnGroupStats").onclick = openGroupTool;
+  $("#btnTv").onclick = openTv;
+  $("#tvClose").onclick = closeTv;
+  document.addEventListener("keydown", (e) => { if (tv.on && (e.key === "Escape" || e.key === "Backspace")) closeTv(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && tv.on) tvWake(); });
   $("#topCount").onclick = (e) => {
     const b = e.target.closest("[data-count]"); if (!b) return;
     $$("#topCount button").forEach((c) => c.classList.toggle("active", c === b));
@@ -1618,6 +1772,7 @@
   new IntersectionObserver((ents) => { if (ents[0].isIntersecting && state.view === "history") moreHistory(); }, { rootMargin: "600px" })
     .observe($("#historySentinel"));
   $("#btnCode").onclick = () => askCode();
+  $("#btnTvPair").onclick = startTvPairing;
   $("#fileInput").onchange = (e) => { if (e.target.files[0]) openLocalFile(e.target.files[0]); };
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && state.source === "sheet" && Date.now() - (state.syncedAt || 0) > 60000) refresh(true);
@@ -1640,10 +1795,13 @@
       const cache = LS.get("pc_cache", null);
       if (cache && cache.matrix) { state.syncedAt = cache.at; buildRows(cache.matrix); buildMoules(cache.mmatrix); }
       renderAll();
-      refresh(true);
+      // adresse …/#tv : la télé de l'atelier démarre directement en Mode TV
+      if (location.hash === "#tv" || isTvDevice()) openTv();
+      else refresh(true);
       return;
     }
     renderAll();
+    if (location.hash === "#tv") return startTvPairing();
     $("#welcome").hidden = false;
   })();
 
