@@ -811,7 +811,7 @@
       <div class="mcard sw-front ${x.etat}" data-moule="${esc(x.key)}" role="button" tabindex="0">
       <span class="mstate">${icon(x.etat === "casse" ? "alert" : x.etat === "sechage" ? "clock" : "check")}</span>
       <span class="mmain"><span class="mname">${esc(x.model)}</span>${x.note ? `<span class="msub">${esc(x.note)}</span>` : ""}
-        ${x.echelle || x.etat !== "ok" || w ? `<span class="mline">${x.echelle ? `<span class="mscale">${x.echelle}</span>` : ""}${x.etat !== "ok" ? `<span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>` : ""}${w ? `<span class="mwait">${w} cde${w > 1 ? "s" : ""} en attente</span>` : ""}</span>` : ""}</span>
+        ${x.echelle || x.etat !== "ok" || w ? `<span class="mline">${x.echelle ? `<span class="mscale">Table ${x.echelle}</span>` : ""}${x.etat !== "ok" ? `<span class="mbadge ${x.etat}">${MOULE_LABEL[x.etat]}</span>` : ""}${w ? `<span class="mwait">${w} cde${w > 1 ? "s" : ""} en attente</span>` : ""}</span>` : ""}</span>
       <span class="mplace ${x.lieu === LIEU_ATELIER ? "atelier" : ""}">${esc(x.lieu)}</span>
     </div></div>`;
   }
