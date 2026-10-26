@@ -673,3 +673,22 @@ body.tv-on { overflow: hidden; }
 #tvPair .logo.big { width: 8em; height: 8em; }
 .tvpair-code { font-size: 4.5em; font-weight: 850; letter-spacing: .12em; color: var(--accent); margin: .3em 0; font-variant-numeric: tabular-nums; }
 #tv .icon-btn[hidden] { display: none; }
+
+/* Commande groupée : une seule tuile, une ligne par carrosserie */
+.job.group { cursor: default; }
+.grp-head { grid-column: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.job.group .grp-label { margin: 0; }
+.job.group .countdown { grid-row: 1; align-self: start; }
+.glines { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.swipe.gl, .gl-static { border-radius: 12px; }
+.gline { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 12px; background: var(--soft); border: 1px solid var(--line); text-align: left; }
+.gline > .swatch { width: 20px; height: 20px; flex: none; }
+.gl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.gl-name { font-weight: 750; font-size: 15.5px; }
+.gl-sub { font-size: 12.5px; color: var(--muted); }
+.gline.gdone { opacity: .55; }
+.gline.gdone .gl-name { text-decoration: line-through; }
+.gl-ok { width: 18px; height: 18px; color: var(--ok); stroke-width: 2.6; flex: none; }
+.swipe.gl .sw-act { font-size: 14px; padding: 0 14px; }
+.gl-add { grid-column: 1 / -1; justify-self: start; display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 6px 10px; border-radius: 10px; color: var(--accent); font-weight: 700; font-size: 13.5px; background: transparent; }
+.gl-add .ic { width: 16px; height: 16px; }

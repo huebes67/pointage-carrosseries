@@ -588,7 +588,18 @@
       <div class="kpi"><div class="v">${month}</div><div class="l">Commandes en ${fmt(t, { month: "long" })}</div></div>`;
     renderRecap(todo.map((x) => x.r));
 
-    $("#todoList").innerHTML = todo.length ? todo.map(({ r, u }) => jobCard(r, u)).join("") :
+    // Commande groupée (même client, même date) : une seule tuile, à la place de sa 1re carrosserie
+    const seen = new Set();
+    const cards = [];
+    for (const { r, u } of todo) {
+      const all = groupRows(r);
+      if (!all) { cards.push(jobCard(r, u)); continue; }
+      const id = r.client + "|" + r.date.getTime();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      cards.push(groupCard(all, u));
+    }
+    $("#todoList").innerHTML = todo.length ? cards.join("") :
       `<div class="empty"><b>Tout est fabriqué</b>Aucune commande en attente.</div>`;
 
     const atelier = state.rows.filter((r) => r.stage === "atelier").reverse();
@@ -768,6 +779,57 @@
     const t = r.date.getTime();
     const g = state.rows.filter((x) => x.client === r.client && x.date && x.date.getTime() === t);
     return g.length > 1 ? { n: g.length, done: g.filter((x) => x.done).length } : null;
+  }
+
+  function groupRows(r) {
+    if (!r.client || !r.date) return null;
+    const t = r.date.getTime();
+    const g = state.rows.filter((x) => x.client === r.client && x.date && x.date.getTime() === t);
+    return g.length > 1 ? g : null;
+  }
+
+  function countdownHtml(u) {
+    let n, lbl;
+    if (u.cls === "unknown") { n = "?"; lbl = "sans date"; }
+    else if (u.left < 0) { n = "+" + -u.left; lbl = -u.left > 1 ? "jours de retard" : "jour de retard"; }
+    else if (u.left === 0) { n = "0"; lbl = "dernier jour"; }
+    else { n = u.left; lbl = u.left > 1 ? "jours restants" : "jour restant"; }
+    return `<div class="countdown"><div class="n">${n}</div><div class="t">${lbl}</div></div>`;
+  }
+
+  // Tuile d'une commande groupée : une ligne par carrosserie.
+  // Chaque ligne se glisse seule (droite = fait, gauche = supprimer) ou s'ouvre d'un appui.
+  function groupCard(all, u) {
+    const r0 = all[0];
+    const done = all.filter((x) => x.done).length;
+    const scaleOf = {};
+    for (const x of allMoules()) scaleOf[x.key] = x.echelle;
+    const pays = new Set(all.map((x) => x.pay));
+    const pay = pays.size === 1 ? payPill(r0) : "";
+    const notes = [...new Set(all.map((x) => x.obs).filter(Boolean))];
+    const pct = u.cls === "unknown" ? 0 : Math.min(100, Math.max(4, (u.age / cfg().delai) * 100));
+    const lines = all.map((r) => {
+      const s = scaleOf[r.key] || scaleFromName(r.model);
+      const inner = `<button class="gline sw-front ${r.done ? "gdone" : ""}" data-row="${r.r}">
+          ${swatch(r.color)}
+          <span class="gl-main"><span class="gl-name">${esc(r.name)}</span>
+            <span class="gl-sub">${esc(r.color || "Sans couleur")}${s ? ` · Table ${s}` : ""}${r.done ? ` · ${r.stage === "atelier" ? "fabriquée" : "récupérée"}` : ""}</span></span>
+          ${r.done ? icon("check", "gl-ok") : mouleFlag(r.key)}
+        </button>`;
+      return r.done ? `<div class="gl-static">${inner}</div>` : swipeWrap(r, "gl", inner);
+    }).join("");
+    return `<div class="jwrap"><div class="job group ${u.cls}">
+      <div class="grp-head">
+        <div class="grp-label">${icon("check")}Commande groupée · ${done}/${all.length} fabriquée${done > 1 ? "s" : ""}</div>
+        <div class="job-title">${esc(r0.client)}</div>
+        <div class="job-meta"><span>Cdé le ${fmt(r0.date, { day: "numeric", month: "short" })}</span>${pay}</div>
+      </div>
+      ${countdownHtml(u)}
+      <div class="glines">${lines}</div>
+      ${notes.length ? `<div class="job-note">${esc(notes.join(" · "))}</div>` : ""}
+      <button class="gl-add" data-addto="${r0.r}">${icon("plus")}Ajouter un modèle</button>
+      <div class="progress"><i style="width:${pct}%"></i></div>
+    </div></div>`;
   }
 
   function jobCard(r, u) {
@@ -1710,6 +1772,8 @@
     if (w && w === swOpen) return closeSwipe();
     const mo = e.target.closest("[data-moule]");
     if (mo) return openMoule(mo.dataset.moule);
+    const add = e.target.closest("[data-addto]");
+    if (add) { const r = state.rows.find((x) => x.r === Number(add.dataset.addto)); if (r) openForm(null, r); return; }
     const el = e.target.closest("[data-row]");
     if (el) openDetail(Number(el.dataset.row));
   });
