@@ -204,7 +204,7 @@
   // ---------- Moules : A Modèle · B État · C Note · D Lieu · E Échelle ----------
   const MOULE_HEAD = ["Modèle", "État", "Note", "Lieu", "Échelle"];
   // Tailles de table d'aspiration (colonne "Échelle" de la feuille)
-  const ECHELLES = ["1/8", "1/8 SC", "1/8 SC large", "1/5"];
+  const ECHELLES = ["1/8", "1/8 SC", "1/8 SC 2mm", "1/8 SC large", "1/5", "1/5 3mm"];
   // Google Sheets transforme "1/8" en date (1er août) : on relit "01/08/2026" comme 1/8
   function readScale(raw) {
     const t = clean(raw).replace(/^'/, "");

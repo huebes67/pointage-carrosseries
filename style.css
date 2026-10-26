@@ -566,7 +566,7 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 #mouleScale { margin: 10px 0 2px; }
 #mouleScale .chip b { font-weight: 700; opacity: .7; margin-left: 2px; }
 .mscale { font-size: 11.5px; font-weight: 750; padding: 2px 7px; border-radius: 7px; background: var(--soft); color: var(--muted); border: 1px solid var(--line); vertical-align: 2px; margin-left: 4px; }
-.mchoice.scale { grid-template-columns: repeat(4, 1fr); }
+.mchoice.scale { grid-template-columns: repeat(3, 1fr); }
 .mchoice.scale button { padding: 9px 2px; line-height: 1.15; font-size: 13px; }
 .mplace { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
 .mplace.atelier { color: var(--accent); border-color: rgba(255,122,26,.45); background: rgba(255,122,26,.08); }
