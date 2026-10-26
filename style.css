@@ -612,3 +612,10 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 
 /* Glisser une fenêtre vers le bas ne doit pas faire défiler la page derrière */
 .sheet { overscroll-behavior: contain; }
+
+/* Étape "fabriquée, à l'atelier" (en attente de récupération) */
+.status.atelier { background: rgba(47,124,246,.15); color: #5b9bff; }
+.qbtn.on-atelier { background: rgba(47,124,246,.12); border-color: #4a8cff; color: #5b9bff; }
+#atelierHead { justify-content: flex-start; gap: 10px; align-items: center; }
+#btnAllPicked { margin-left: auto; }
+#btnAllPicked.confirm { background: var(--ok); color: #04210f; }

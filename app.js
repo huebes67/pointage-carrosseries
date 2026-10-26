@@ -1,5 +1,5 @@
 /* Pointage Carrosseries — lit et modifie la feuille "Commande" du fichier Excel.
-   Colonnes : A Date · B Faite ("F") · C Modèle · D Couleur · E Client / note · F Observations */
+   Colonnes : A Date · B Étape (vide = à faire, "A" = fabriquée à l'atelier, "F" = récupérée) · C Modèle · D Couleur · E Client / note · F Observations */
 (function () {
   "use strict";
 
@@ -177,6 +177,7 @@
         date: own || carry,
         doneRaw: v(1),
         done: clean(v(1)) !== "",
+        stage: stageOf(v(1)),
         model,
         key: modelKey(model),
         colorRaw: clean(v(3)),
@@ -251,6 +252,15 @@
     if (x.etat === "casse") return `<span class="mflag casse">${icon("alert")}Moule cassé</span>`;
     return `<span class="mflag sechage">${icon("clock")}Moule en séchage</span>`;
   }
+
+  // Colonne B : vide = à faire · "A" = fabriquée, à l'atelier (pas encore récupérée) · "F" (ou autre) = récupérée
+  function stageOf(raw) {
+    const f = fold(raw);
+    if (!f) return "todo";
+    if (f === "a" || f.startsWith("atel")) return "atelier";
+    return "done";
+  }
+  const STAGE_LABEL = { todo: "À faire", atelier: "À l'atelier", done: "Faite" };
 
   // "" = non renseigné (anciennes commandes) · "paid" · "unpaid"
   function payState(raw) {
@@ -574,7 +584,13 @@
     $("#todoList").innerHTML = todo.length ? todo.map(({ r, u }) => jobCard(r, u)).join("") :
       `<div class="empty"><b>Tout est fabriqué</b>Aucune commande en attente.</div>`;
 
-    const recent = state.rows.filter((r) => r.done).slice(-6).reverse();
+    const atelier = state.rows.filter((r) => r.stage === "atelier").reverse();
+    $("#atelierHead").hidden = !atelier.length;
+    $("#atelierCount").textContent = atelier.length;
+    $("#atelierList").innerHTML = atelier.map((r, i) => rowHtml(r, i === atelier.length - 1)).join("");
+    const allBtn = $("#btnAllPicked");
+    allBtn.classList.remove("confirm"); allBtn.textContent = "Tout récupéré";
+    const recent = state.rows.filter((r) => r.stage === "done").slice(-6).reverse();
     $("#recentList").innerHTML = recent.map((r, i) => rowHtml(r, i === recent.length - 1)).join("");
   }
 
@@ -612,7 +628,7 @@
   // Droite = fait / pas fait · gauche = supprimer
   function swipeWrap(r, cls, inner) {
     return `<div class="swipe ${cls}" data-swipe="${r.r}">
-      <button class="sw-act sw-done" data-sw="done" tabindex="-1">${r.done ? icon("undo") + "Pas fait" : icon("check") + "Fait"}</button>
+      <button class="sw-act sw-done" data-sw="done" tabindex="-1">${r.stage === "todo" ? icon("check") + "Fait" : r.stage === "atelier" ? icon("check") + "Récupérée" : icon("undo") + "Pas récupérée"}</button>
       <button class="sw-act sw-del" data-sw="del" tabindex="-1">${icon("trash")}Supprimer</button>
       ${inner}
     </div>`;
@@ -628,7 +644,7 @@
         <div class="row-sub">${esc(sub || fmt(r.date))}</div>
       </div>
       <div class="row-side">
-        <span class="status ${r.done ? "done" : "todo"}">${r.done ? "Faite" : "À faire"}</span>
+        <span class="status ${r.stage}">${STAGE_LABEL[r.stage]}</span>
         ${payPill(r)}
       </div>
     </button>`);
@@ -643,6 +659,7 @@
     state.hist.list = state.rows.filter((r) => {
       if (st === "todo" && r.done) return false;
       if (st === "done" && !r.done) return false;
+      if (st === "atelier" && r.stage !== "atelier") return false;
       if (st === "unpaid" && r.pay !== "unpaid") return false;
       if (!terms.length) return true;
       const hay = fold([r.name, r.model, r.colorRaw, r.color, r.client, r.obs, r.pay === "unpaid" ? "non payee" : r.pay === "paid" ? "payee" : "", r.date ? fmt(r.date, { day: "numeric", month: "long", year: "numeric" }) : ""].join(" "));
@@ -867,18 +884,20 @@
     const r = state.rows.find((x) => x.r === rowNum);
     if (!r) return;
     const u = urgency(r);
-    let statut = "Fabriquée";
+    let statut = r.stage === "atelier" ? "Fabriquée · à l'atelier" : "Récupérée";
     if (u) statut = u.cls === "unknown" ? "À faire" : u.left < 0 ? `En retard de ${-u.left} j` : `À faire · ${u.left} j restant${u.left > 1 ? "s" : ""}`;
     const payTxt = r.pay === "paid" ? "Payée" : r.pay === "unpaid" ? "Non payée" : "Non renseigné";
     openSheet(`
       <div class="detail-head">
         ${swatch(r.color, "lg")}
-        <div><h3>${esc(r.name)}</h3><span class="status ${r.done ? "done" : "todo"}" ${u ? `style="--u:var(--${u.cls === "unknown" ? "muted" : u.cls})"` : ""}>${esc(statut)}</span></div>
+        <div><h3>${esc(r.name)}</h3><span class="status ${r.stage}" ${u ? `style="--u:var(--${u.cls === "unknown" ? "muted" : u.cls})"` : ""}>${esc(statut)}</span></div>
       </div>
       ${mouleFlag(r.key) && !r.done ? `<div class="mwarn">${mouleFlag(r.key, true)}</div>` : ""}
       <div class="quick">
-        <button class="qbtn ${r.done ? "on-done" : ""}" data-act="done">
-          ${icon(r.done ? "check" : "tool", "q")}${r.done ? "Fabriquée" : "Marquer fabriquée"}<small>${r.done ? "appuyer pour annuler" : "en cours"}</small>
+        <button class="qbtn ${r.stage === "done" ? "on-done" : r.stage === "atelier" ? "on-atelier" : ""}" data-act="done">
+          ${r.stage === "todo" ? `${icon("tool", "q")}Marquer fabriquée<small>en cours</small>`
+            : r.stage === "atelier" ? `${icon("check", "q")}Marquer récupérée<small>fabriquée, à l'atelier</small>`
+            : `${icon("check", "q")}Récupérée<small>appuyer pour annuler</small>`}
         </button>
         <button class="qbtn ${r.pay === "paid" ? "on-paid" : r.pay === "unpaid" ? "on-unpaid" : ""}" data-act="pay">
           ${icon("euro", "q")}${payTxt}<small>appuyer pour changer</small>
@@ -899,6 +918,7 @@
         ${r.obs ? `<div class="cell full"><div class="k">Observations</div><div class="v">${esc(r.obs)}</div></div>` : ""}
       </div>
       <div class="btns">
+        ${r.stage === "atelier" ? `<button class="btn ghost" data-act="undo">${icon("undo")}Remettre à fabriquer</button>` : ""}
         <button class="btn ghost" data-act="addto">${icon("plus")}Ajouter un modèle à cette commande</button>
         <button class="btn ghost" data-act="edit">Tout modifier (date, modèle, observations…)</button>
       </div>`);
@@ -907,7 +927,7 @@
       $$("#sheetBody button").forEach((b) => (b.disabled = true));
       try {
         await writeRow(r.r, values, r.model);
-        if (!(values[1] === "F" && checkGroupDone(r.r))) toast(msg);
+        if (!(values[1] === "A" && checkGroupDone(r.r))) toast(msg);
         if (close) closeSheet(); else openDetail(r.r);
       } catch (err) {
         $$("#sheetBody button").forEach((b) => (b.disabled = false));
@@ -925,7 +945,13 @@
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "edit") return openForm(r);
       if (act === "addto") return openForm(null, r);
-      if (act === "done") return save([null, r.done ? "" : "F", null, null, null, null, null], r.done ? "Remise en cours" : `${r.name} fabriquée`, !r.done);
+      if (act === "done") {
+        // à faire -> à l'atelier -> récupérée (et récupérée -> retour à l'atelier pour annuler)
+        const next = r.stage === "todo" ? "A" : r.stage === "atelier" ? "F" : "A";
+        const msg = r.stage === "todo" ? `${r.name} fabriquée · à l'atelier` : r.stage === "atelier" ? `${r.name} récupérée` : "Remise à l'atelier";
+        return save([null, next, null, null, null, null, null], msg, r.stage !== "done");
+      }
+      if (act === "undo") return save([null, "", null, null, null, null, null], "Remise à fabriquer", true);
       if (act === "pay") return save([null, null, null, null, null, null, PAY_VALUE[r.pay === "paid" ? "unpaid" : "paid"]], r.pay === "paid" ? "Non payée" : "Payée");
       if (act === "note") return save([null, null, null, null, clean($("#qNote").value), null, null], "Note enregistrée");
     };
@@ -1052,7 +1078,7 @@
       const [y, mo, d] = form.date.value.split("-").map(Number);
       const date = new Date(y, mo - 1, d);
       const colorVal = color === "__other" ? clean(form.colorOther.value) : color;
-      const done = $("#doneSwitch").classList.contains("on") ? "F" : "";
+      const done = $("#doneSwitch").classList.contains("on") ? (r && r.stage === "atelier" ? null : r && r.done ? null : "F") : "";
       const dateChanged = isNew || !r.date || r.date.getTime() !== date.getTime();
       const payOn = $("#paySwitch").classList.contains("on");
       // Ancienne commande sans info de paiement : on ne touche pas la colonne si l'interrupteur n'a pas bougé
@@ -1480,8 +1506,12 @@
       closeSwipe();
       if (!r) return;
       if (act.dataset.sw === "del") return confirmDelete(r);
-      writeRow(r.r, [null, r.done ? "" : "F", null, null, null, null, null], r.model)
-        .then(() => { if (r.done || !checkGroupDone(r.r)) toast(r.done ? "Remise en cours" : `${r.name} fabriquée`); })
+      const next = r.stage === "todo" ? "A" : r.stage === "atelier" ? "F" : "A";
+      writeRow(r.r, [null, next, null, null, null, null, null], r.model)
+        .then(() => {
+          if (r.stage === "todo" && checkGroupDone(r.r)) return;
+          toast(r.stage === "todo" ? `${r.name} fabriquée · à l'atelier` : r.stage === "atelier" ? `${r.name} récupérée` : "Remise à l'atelier");
+        })
         .catch((err) => toast("Échec : " + err.message, true));
       return;
     }
@@ -1517,6 +1547,21 @@
     LS.set("pc_mouleOrder", next);
     renderMoules();
     toast(next === "jean" ? "Chez Jean en haut" : "Atelier en haut");
+  };
+  // Toutes les commandes à l'atelier passent en "récupérée" (2 appuis pour confirmer)
+  $("#btnAllPicked").onclick = async (e) => {
+    const b = e.currentTarget;
+    const list = state.rows.filter((r) => r.stage === "atelier");
+    if (!list.length) return;
+    if (!b.classList.contains("confirm")) {
+      b.classList.add("confirm"); b.textContent = `Confirmer (${list.length})`;
+      setTimeout(() => { b.classList.remove("confirm"); b.textContent = "Tout récupéré"; }, 4000);
+      return;
+    }
+    try {
+      for (const r of list) await writeRow(r.r, [null, "F", null, null, null, null, null], r.model);
+      toast(`${list.length} commande${list.length > 1 ? "s" : ""} récupérée${list.length > 1 ? "s" : ""}`);
+    } catch (err) { toast("Échec : " + err.message, true); }
   };
   $("#todoSort").onclick = () => {
     const next = LS.get("pc_todoSort", "old") === "new" ? "old" : "new";

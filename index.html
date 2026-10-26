@@ -71,7 +71,9 @@
         </div>
       </div>
       <div id="todoList" class="cards"></div>
-      <div class="section-head"><h2>Dernières faites</h2></div>
+      <div class="section-head" id="atelierHead" hidden><h2>À récupérer à l'atelier</h2><span class="mcount" id="atelierCount"></span><button class="link-btn" id="btnAllPicked" type="button">Tout récupéré</button></div>
+      <div id="atelierList" class="rows"></div>
+      <div class="section-head"><h2>Dernières récupérées</h2></div>
       <div id="recentList" class="rows"></div>
     </section>
 
@@ -84,6 +86,7 @@
       <div class="chips" id="statusChips">
         <button class="chip active" data-status="all">Toutes</button>
         <button class="chip" data-status="todo">À faire</button>
+        <button class="chip" data-status="atelier">À l'atelier</button>
         <button class="chip" data-status="done">Faites</button>
         <button class="chip" data-status="unpaid">Non payées</button>
       </div>
