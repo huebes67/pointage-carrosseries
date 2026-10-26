@@ -203,17 +203,18 @@
 
   // ---------- Moules : A Modèle · B État · C Note · D Lieu · E Échelle ----------
   const MOULE_HEAD = ["Modèle", "État", "Note", "Lieu", "Échelle"];
-  const ECHELLES = ["1/5", "1/7", "1/8", "1/10", "1/16"];
-  // Échelle écrite dans le nom du modèle ("Cox baja 1/10", "Truggy 1/8"…)
-  // Google Sheets transforme "1/10" en date (1er octobre) : on relit "01/10/2026" comme 1/10
+  // Tailles de table d'aspiration (colonne "Échelle" de la feuille)
+  const ECHELLES = ["1/8", "1/8 SC", "1/8 SC large", "1/5"];
+  // Google Sheets transforme "1/8" en date (1er août) : on relit "01/08/2026" comme 1/8
   function readScale(raw) {
     const t = clean(raw).replace(/^'/, "");
     const d = t.match(/^0?1\/(\d{1,2})\/\d{2,4}$/);
-    if (d && ECHELLES.includes("1/" + Number(d[1]))) return "1/" + Number(d[1]);
-    return t;
+    if (d) return "1/" + Number(d[1]);
+    return ECHELLES.find((e) => fold(e) === fold(t)) || t;
   }
+  // Taille écrite dans le nom du modèle ("Truggy 1/8", "Kraton 1/5", aussi "1:8", "1 / 5")
   function scaleFromName(name) {
-    const m = String(name || "").match(/\b1\s*\/\s*(5|7|8|10|16)\b/);
+    const m = String(name || "").match(/(?:^|[^\d])1\s*[\/:]\s*(5|8)(?!\d)/);
     return m ? "1/" + m[1] : "";
   }
   const LIEUX = ["Chez Jean", "À l'atelier"];
@@ -580,6 +581,7 @@
       <div class="kpi ${late ? "danger" : ""}"><div class="v">${late}</div><div class="l">En retard (&gt; ${cfg().delai} j)</div></div>
       <button class="kpi ${unpaid ? "warn" : ""}" data-goto="unpaid"><div class="v">${unpaid}</div><div class="l">Non payées</div></button>
       <div class="kpi"><div class="v">${month}</div><div class="l">Commandes en ${fmt(t, { month: "long" })}</div></div>`;
+    renderRecap(todo.map((x) => x.r));
 
     $("#todoList").innerHTML = todo.length ? todo.map(({ r, u }) => jobCard(r, u)).join("") :
       `<div class="empty"><b>Tout est fabriqué</b>Aucune commande en attente.</div>`;
@@ -592,6 +594,25 @@
     allBtn.classList.remove("confirm"); allBtn.textContent = "Tout récupéré";
     const recent = state.rows.filter((r) => r.stage === "done").slice(-6).reverse();
     $("#recentList").innerHTML = recent.map((r, i) => rowHtml(r, i === recent.length - 1)).join("");
+  }
+
+  // Barre récap des carrosseries à faire : échelle · couleur · nombre
+  function renderRecap(todo) {
+    const scaleOf = {};
+    for (const x of allMoules()) scaleOf[x.key] = x.echelle;
+    const by = {};
+    for (const r of todo) {
+      const s = scaleOf[r.key] || scaleFromName(r.model) || "";
+      const c = r.color || "";
+      ((by[s] ||= {})[c] = (by[s][c] || 0) + 1);
+    }
+    const rank = (s) => (s ? ECHELLES.indexOf(s) : 99);
+    $("#todoRecap").hidden = !todo.length;
+    $("#todoRecap").innerHTML = Object.keys(by).sort((a, b) => rank(a) - rank(b)).map((s) => {
+      const cols = Object.entries(by[s]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "fr"));
+      return `<div class="rc-g"><b>${s || "Sans taille"}</b>${cols.map(([c, n]) =>
+        `<span class="rc">${c ? swatch(c) : ""}${esc(c || "Sans couleur")}<em>${n}</em></span>`).join("")}</div>`;
+    }).join("");
   }
 
   // Commande groupée = même client, même date, au moins 2 carrosseries
@@ -742,26 +763,45 @@
   // un nom tapé librement dans une nouvelle commande n'ajoute pas de moule (on l'ajoute avec le +).
   const MOULES_DEPUIS = new Date(2026, 9, 24);
   function allMoules() {
-    const names = {}, auto = new Set();
+    const names = {}, auto = new Set(), nameScale = {};
     for (const r of state.rows) {
       names[r.key] = r.name;
       if (!r.date || r.date <= MOULES_DEPUIS) auto.add(r.key);
+      // échelle écrite dans une des écritures du modèle ("Mini truggy 1/16" regroupé sous "Mini truggy")
+      if (!nameScale[r.key]) nameScale[r.key] = scaleFromName(r.model);
     }
+    // x.model = nom affiché (celui du regroupement) ; x.rows = lignes de la feuille avec leur vrai nom.
+    // Plusieurs lignes pour un même modèle (regroupées) : la dernière ligne encore active fait foi.
     const byKey = {};
-    for (const x of state.moules) byKey[x.key] = { ...x, model: names[x.key] || x.model, lieu: x.lieu || LIEU_JEAN };
-    for (const k of auto) if (!byKey[k]) byKey[k] = { r: null, model: names[k], key: k, etat: "ok", note: "", lieu: LIEU_JEAN, scale: "", virtual: true };
+    for (const x of state.moules) {
+      const cur = byKey[x.key];
+      if (cur && x.etat === "supprime" && cur.etat !== "supprime") { cur.rows.push(x); continue; }
+      byKey[x.key] = { ...x, model: names[x.key] || x.model, lieu: x.lieu || LIEU_JEAN, rows: (cur ? cur.rows : []).concat(x) };
+    }
+    for (const k of auto) if (!byKey[k]) byKey[k] = { r: null, model: names[k], key: k, etat: "ok", note: "", lieu: LIEU_JEAN, scale: "", virtual: true, rows: [] };
     const list = Object.values(byKey).filter((x) => x.etat !== "supprime");
-    for (const x of list) x.echelle = ECHELLES.includes(x.scale) ? x.scale : scaleFromName(x.model);
+    for (const x of list) {
+      x.echelle = ECHELLES.includes(x.scale) ? x.scale
+        : scaleFromName(x.model) || x.rows.map((y) => scaleFromName(y.model)).find(Boolean) || nameScale[x.key] || "";
+    }
     return list;
   }
   const findMoule = (key) => allMoules().find((x) => x.key === key);
 
-  // Enregistre un changement (état, note ou lieu) ; crée la ligne si le moule n'est pas encore dans la feuille
+  // Enregistre un changement (état, note ou lieu) ; crée la ligne si le moule n'est pas encore dans la feuille.
+  // Le garde-fou du script compare avec le nom écrit dans la feuille (pas le nom du regroupement).
   function saveMoule(x, patch) {
     if (x.virtual) {
       return writeMoule(null, [realName(x.model), MOULE_LABEL[patch.etat || x.etat], patch.note ?? x.note, patch.lieu ?? x.lieu, patch.scale ?? x.scale ?? ""]);
     }
-    return writeMoule(x.r, [null, patch.etat ? MOULE_LABEL[patch.etat] : null, patch.note ?? null, patch.lieu ?? null, patch.scale ?? null], x.model);
+    const values = [null, patch.etat ? MOULE_LABEL[patch.etat] : null, patch.note ?? null, patch.lieu ?? null, patch.scale ?? null];
+    // lignes en double du même modèle : même changement partout, sinon l'ancienne garde son état
+    const targets = x.rows.filter((y) => y.r === x.r || y.etat !== "supprime");
+    return Promise.all(targets.map((y) => writeMoule(y.r, values, y.model)));
+  }
+  // Efface toutes les lignes du moule (de bas en haut : les numéros des autres ne bougent pas)
+  async function removeMoule(x) {
+    for (const y of x.rows.slice().sort((a, b) => b.r - a.r)) await deleteMoule(y);
   }
 
   function mouleCard(x, waiting) {
@@ -1117,7 +1157,7 @@
       <div class="mchoice lieu">
         ${LIEUX.map((l) => `<button data-lieu="${esc(l)}" class="${x.lieu === l ? "active lieu" : ""}">${esc(l)}</button>`).join("")}
       </div>
-      <div class="qlabel">Échelle${!x.scale && x.echelle ? ` <span class="muted">· trouvée dans le nom</span>` : ""}</div>
+      <div class="qlabel">Taille de table${!x.scale && x.echelle ? ` <span class="muted">· trouvée dans le nom</span>` : ""}</div>
       <div class="mchoice scale">
         ${ECHELLES.map((e) => `<button data-scale="${e}" class="${x.echelle === e ? "active lieu" : ""}">${e}</button>`).join("")}
       </div>
@@ -1135,10 +1175,10 @@
     $("#sheetBody").onclick = async (e) => {
       const scb = e.target.closest("[data-scale]");
       if (scb) {
-        // même échelle touchée une 2e fois = on l'enlève
+        // même taille touchée une 2e fois = on l'enlève
         const scale = scb.dataset.scale === x.scale ? "" : scb.dataset.scale;
         if (!scale && !x.scale) return;
-        return save({ scale }, scale ? `Échelle ${scale}` : "Échelle enlevée");
+        return save({ scale }, scale ? `Table ${scale}` : "Taille enlevée");
       }
       const li = e.target.closest("[data-lieu]");
       if (li) {
@@ -1159,7 +1199,7 @@
           btn.classList.add("confirm"); btn.innerHTML = `${icon("trash")}Appuie encore pour confirmer`;
           return;
         }
-        await deleteMoule(x); closeSheet(); toast(inOrders ? "Moule remis par défaut" : "Moule supprimé");
+        await removeMoule(x); closeSheet(); toast(inOrders ? "Moule remis par défaut" : "Moule supprimé");
       }
     };
   }
@@ -1182,7 +1222,7 @@
       try {
         // moule lié aux commandes : on le masque (sinon il reviendrait) ; moule ajouté à la main : on efface la ligne
         if (fromOrders) await saveMoule(x, { etat: "supprime" });
-        else await deleteMoule(x);
+        else await removeMoule(x);
         closeSheet();
         toast("Moule supprimé");
       } catch (err) { toast("Échec : " + err.message, true); }
@@ -1207,7 +1247,7 @@
             <button type="button" data-etat="sechage">${icon("clock")}Séchage</button>
           </div>
         </div>
-        <div class="field"><label>Échelle</label>
+        <div class="field"><label>Taille de table</label>
           <div class="mchoice scale">${ECHELLES.map((e) => `<button type="button" data-scale="${e}">${e}</button>`).join("")}</div>
         </div>
         <div class="field"><label>Où est le moule ?</label>
