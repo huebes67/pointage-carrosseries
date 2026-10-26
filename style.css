@@ -629,3 +629,5 @@ main { padding: 8px 8px calc(110px + var(--safe-bot)); max-width: 900px; margin:
 .rc + .rc { padding-left: 6px; border-left: 1px solid var(--line); }
 .rc em { font-style: normal; font-weight: 700; color: var(--text); }
 .rc .swatch { width: 10px; height: 10px; }
+/* Taille de table sous le nom du moule */
+.mline .mscale { margin-left: 0; vertical-align: 0; }
